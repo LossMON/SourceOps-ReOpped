@@ -58,7 +58,7 @@ If you need a physics mesh that actually fits your model:
 ## **How to Export**
 
 *   **Single Export:** Click the **Auto Export** icon (the icon with the car). It runs the whole chain: Mesh > Textures > QC > Compile > View.
-*   **Batch Export:** Open the SourceOps export panel to see a list of all models in your scene. Simply **check the boxes** next to the models you want to export and click the batch compile button to process them all at once.
+*   **Batch Export:** Open the SourceOps export panel to see a list of all models in your scene. Simply **check the boxes** next to the models you want to export and click the compile button (CAR ICON) to process them all at once. This also applies to the custom compile settings (by holding CTRL and left clicking the Car icon) those same settings will also apply to all of the models that are about to compile wether if you only wanted to export the mesh or only update the vmt's or vtf's and so on
 
 **PRO TIP:** **Hold CTRL + Left Click** on the Export icon to open a hidden menu. You can toggle specific steps on or off if you only want to re-compile the model or only export textures.
 
