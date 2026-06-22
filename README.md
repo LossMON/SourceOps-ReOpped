@@ -25,6 +25,7 @@
 *   **No more manual QC editing:** ReOpped writes your `$cdmaterials`, `$modelname`, `$lod` blocks, and bodygroup syntax for you.
 
 ### **4. Better Tooling**
+*   **Multi-Model Batch Compilation:** You can now compile multiple models at once. The UI features a selection list where you can **check-mark the boxes** for specific models and process them all in a single batch.
 *   **Auto-Restore:** Your game paths and preferences are backed up to a JSON file. Every time you open Blender, they are reloaded instantly.
 *   **Modern Compilers:** Built-in support for community tools like **HLMV++** and **StudioMDL++**.
 *   **Scale Reference:** A button to instantly spawn an **info_playerstart** model so you don't mess up your prop scale.
@@ -56,7 +57,8 @@ If you need a physics mesh that actually fits your model:
 
 ## **How to Export**
 
-Just click the **Auto Export** icon (the icon with the car). It runs the whole chain: Mesh > Textures > QC > Compile > View.
+*   **Single Export:** Click the **Auto Export** icon (the icon with the car). It runs the whole chain: Mesh > Textures > QC > Compile > View.
+*   **Batch Export:** Open the SourceOps export panel to see a list of all models in your scene. Simply **check the boxes** next to the models you want to export and click the batch compile button to process them all at once.
 
 **PRO TIP:** **Hold CTRL + Left Click** on the Export icon to open a hidden menu. You can toggle specific steps on or off if you only want to re-compile the model or only export textures.
 
