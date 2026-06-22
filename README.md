@@ -10,7 +10,7 @@
 ---
 
 ## **Video Tutorial**
-[![Watch the tutorial](https://www.youtube.com/watch?v=RWKZuFzWLZE)
+[Watch the video tutorial](https://www.youtube.com/watch?v=RWKZuFzWLZE)
 
 ---
 
