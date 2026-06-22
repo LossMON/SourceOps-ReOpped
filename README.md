@@ -12,7 +12,7 @@
 ## **New Features & Overhauls**
 
 ### **1. Automated Texture & Material Pipeline**
-*   **Native Conversion:** Powered by **MareTF**. ReOpped extracts and converts your Blender textures into VTF format automatically when you export.
+*   **Integrated Conversion:** Powered by **MareTF**. ReOpped extracts and converts your Blender textures into VTF format automatically when you export.
 *   **Smart VMTs:** It generates your `.vmt` files for you but **it won't wipe your manual work**. If you edit a VMT in a text editor, ReOpped is smart enough to preserve those changes on the next export.
 *   **Alpha & Normal Maps:** You get automated **Alpha Baking** (pulled directly from your Blender BSDF sliders) and 1-click **Normal Map** (`_normalmap`) generation.
 
@@ -37,9 +37,9 @@ If you need a physics mesh that actually fits your model:
 1.  **Select your object** in the viewport.
 2.  Press **F3** and search for `SourceOps Collision` (or find it in the **Object** menu at the top).
 3.  In the V-HACD menu, look for **Maximum Concavity**:
-    *   **Set it to 0:** Most detailed/accurate (creates more hulls).
-    *   **Set it to 1:** Simplest/fastest (creates fewer hulls).
-    *   Find a balance in between that looks good for your model.
+    *   **Set it to 0:** Most detailed and accurate (creates more hulls).
+    *   **Set it to 1:** Simplest and fastest (creates fewer hulls).
+    *   Adjust the slider between **0 and 1** to find what works best for your specific model.
 
 ---
 
@@ -55,7 +55,7 @@ If you need a physics mesh that actually fits your model:
 
 ## **How to Export**
 
-Just click the **Auto Export** icon (the one with the car/magic wand). It runs the whole chain: Mesh > Textures > QC > Compile > View.
+Just click the **Auto Export** icon (the icon with the car). It runs the whole chain: Mesh > Textures > QC > Compile > View.
 
 **PRO TIP:** **Hold CTRL + Left Click** on the Export icon to open a hidden menu. You can toggle specific steps on or off if you only want to re-compile the model or only export textures.
 
@@ -70,7 +70,7 @@ This addon wouldn't work without these great projects:
 
 ---
 
-## **Shoutout**
+## **Special Thanks**
 
 A huge shoutout to **Glad-BR** for the massive help with the Linux integration. They did the heavy lifting to make **MareTF** work natively on Linux for this version.
 Check them out: https://github.com/Glad-BR
@@ -86,12 +86,6 @@ https://github.com/bonjorno7/SourceOps
 
 **Original Team:**
 bonjorno7, CabbageMcGravel, GorangeNinja, JonasAlmaas, KrystianoXPL, Peak-CDE, REDxEYE, SethTooQuick, VortexParadox, xchellx, Horiuchi.
-
----
-
-## **Special Thanks**
-
-Special thanks to the **SourceIO** and **SourceOps** Discord communities for the testing and feedback during development.
 
 ---
 
