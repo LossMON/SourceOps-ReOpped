@@ -10,9 +10,11 @@ from math import degrees
 from shutil import move
 from pathlib import Path
 from traceback import print_exc
-from ... utils import common
-from . smd import SMD
-from . fbx import export_fbx
+
+# 3 DOTS HERE ARE REQUIRED SO IT GOES UP TO THE ROOT ADDON FOLDER!
+from ...utils import common
+from .smd import SMD
+from .fbx import export_fbx
 
 
 class Model:
@@ -325,6 +327,7 @@ class Model:
     def _convert_to_vtf(self, tga_path, vtf_path, config, is_normal):
         # ATTEMPT NATIVE PYVTFLIB (MareTF)
         try:
+            # 3 DOTS HERE ALSO TO BE SAFE
             from ...PyVTFlib import ops as pyvtf_ops, VTFConvertOptions, IMAGE_FORMAT, VTF_FLAG, VTFResizeOptions, RESIZE_METHOD, RESIZE_FILTER, MODE, VERSION
             
             fmt_str = getattr(config, "vtf_format", "DXT5")
@@ -382,7 +385,7 @@ class Model:
                 resize=resize_options,
                 normal=None, # Already baked inside python! Avoid double scaling/inversions
                 disable_mips=disable_mips,
-                version=VERSION.V7_2
+                version=VERSION.V7_4
             )
             vtf_ops = pyvtf_ops()
             
@@ -526,7 +529,9 @@ class Model:
                         custom_text = bpy.data.texts.get(text_name)
                         custom_lines = []
                         user_overrides = {}
-                        controlled_keys = ["$basetexture", "$bumpmap", "$surfaceprop", "$model", "$translucent", "$alphatest", "$nocull", "$envmap", "$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"]
+                        
+                        ui_keys = ["$basetexture", "$bumpmap", "$surfaceprop", "$model", "$translucent", "$alphatest", "$nocull", "$envmap"]
+                        hardcoded_keys = ["$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"]
                         
                         # First try Blender Text Editor, then fall back to physical VMT file
                         lines_to_parse = []
@@ -551,7 +556,9 @@ class Model:
                             is_controlled = False
                             if stripped:
                                 first_word = stripped.replace('"', '').split()[0].lower()
-                                if first_word in controlled_keys: 
+                                if first_word in ui_keys:
+                                    is_controlled = True
+                                elif first_word in hardcoded_keys: 
                                     user_overrides[first_word] = raw_line.rstrip('\n')
                                     is_controlled = True
                                     
