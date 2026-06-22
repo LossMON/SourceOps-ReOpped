@@ -271,156 +271,107 @@ class Model:
             settings.file_format, settings.color_mode, scene.view_settings.view_transform = orig_fmt, orig_mode, orig_vt
         return temp_path
         
-    def _convert_to_vtf_background(self, input_path, output_path, vtfcmd_executable, vtf_args, postfix=""):
+    def _convert_to_vtf(self, tga_path, vtf_path, config, is_normal):
         try:
-            output_dir = os.path.dirname(output_path)
-            input_filename = os.path.basename(input_path)
-            vtfcmd_dir = os.path.dirname(vtfcmd_executable)
-            
-            if os.name == 'posix':
-                prefs = common.get_prefs(bpy.context)
-                wine_raw = getattr(prefs, 'wine', '')
-                wine_exe = 'wine' if not wine_raw or wine_raw.strip() in ('.', '//', '') else str(bpy.path.abspath(wine_raw))
-                
-                # Executing from output_dir so input/output paths are bare filenames for Wine
-                cmd =[wine_exe, vtfcmd_executable, "-file", input_filename, "-output", "."] + vtf_args
-            else:
-                cmd =[vtfcmd_executable, "-file", input_path, "-output", output_dir] + vtf_args
-            
-            if postfix:
-                cmd.extend(["-postfix", postfix])
-                
-            print(f"\n[SourceOps] >>> Executing VTFCmd: {' '.join(cmd)}")
-                
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            
-            env = os.environ.copy()
-            if os.name == 'posix':
-                env['WINEDEBUG'] = '-all'
-                
-            cwd = output_dir if os.name == 'posix' else vtfcmd_dir
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, cwd=cwd, env=env)
-            if result.returncode != 0: 
-                print(f"[SourceOps VTFCmd CRITICAL ERROR] Failed to convert texture!")
-                print(f"[Return Code]: {result.returncode}")
-                print(f"[VTFCmd STDOUT]: {result.stdout}")
-                print(f"[VTFCmd STDERR]: {result.stderr}")
-                return False
-                
-            expected_vtf = os.path.join(output_dir, os.path.splitext(input_filename)[0] + postfix + ".vtf")
-            if not os.path.exists(expected_vtf): 
-                print(f"[SourceOps ERROR] VTFCmd succeeded but output file '{expected_vtf}' was not found.")
-                return False
-            
-            if expected_vtf != output_path:
-                if os.path.exists(output_path): os.remove(output_path)
-                os.rename(expected_vtf, output_path)
-                
-            print(f"[SourceOps] -> VTFCmd Conversion Successful for {os.path.basename(output_path)}")
-            return True
-        except Exception as e:
-            print(f"[SourceOps ERROR] Subprocess crashed running VTFCmd: {e}")
+            from ...PyVTFlib import create, CreateVTFOptions, FORMAT, VTF_FLAG, NormalMapOptions, ResizeOptions, RESIZE_METHOD, RESIZE_FILTER, VERSION
+        except ImportError as e:
+            print(f"[SourceOps ERROR] Failed to import PyVTFLib: {e}")
             return False
 
-    def _convert_to_vtf(self, tga_path, vtf_path, config, is_normal, vtfcmd_executable, vtf_args, postfix=""):
-        
-        # 1. ATTEMPT NATIVE PYVTFLIB (MareTF)
+        fmt_str = getattr(config, "vtf_format", "DXT5")
         try:
-            from ...PyVTFlib import ops as pyvtf_ops, VTFConvertOptions, IMAGE_FORMAT, VTF_FLAG, VTFNormalMapOptions, VTFResizeOptions, RESIZE_METHOD, RESIZE_FILTER, MODE, VERSION
-            
-            fmt_str = getattr(config, "vtf_format", "DXT5")
-            try: fmt_enum = IMAGE_FORMAT[fmt_str]
-            except KeyError: fmt_enum = IMAGE_FORMAT.DXT5
-                
-            flag_mapping = {
-                "POINTSAMPLE": "POINT_SAMPLE", "TRILINEAR": "TRILINEAR", "CLAMPS": "CLAMP_S",
-                "CLAMPT": "CLAMP_T", "ANISOTROPIC": "ANISOTROPIC", "NORMAL": "NORMAL",
-                "NOLOD": "NO_LOD", "PROCEDURAL": "PROCEDURAL", "RENDERTARGET": "RENDERTARGET",
-                "DEPTHRENDERTARGET": "DEPTH_RENDERTARGET", "NODEBUGOVERRIDE": "NO_DEBUG_OVERRIDE",
-                "SINGLECOPY": "SINGLE_COPY", "NODEPTHBUFFER": "NO_DEPTH_BUFFER", "CLAMPU": "CLAMP_U",
-                "VERTEXTEXTURE": "VERTEX_TEXTURE", "SSBUMP": "SSBUMP", "BORDER": "BORDER",
+            fmt_enum = FORMAT[fmt_str]
+        except KeyError:
+            fmt_enum = FORMAT.DXT5
+
+        flag_mapping = {
+            "POINTSAMPLE": "POINT_SAMPLE", "TRILINEAR": "TRILINEAR", "CLAMPS": "CLAMP_S",
+            "CLAMPT": "CLAMP_T", "ANISOTROPIC": "ANISOTROPIC", "NORMAL": "NORMAL",
+            "NOLOD": "NO_LOD", "PROCEDURAL": "PROCEDURAL", "RENDERTARGET": "RENDERTARGET",
+            "DEPTHRENDERTARGET": "DEPTH_RENDERTARGET", "NODEBUGOVERRIDE": "NO_DEBUG_OVERRIDE",
+            "SINGLECOPY": "SINGLE_COPY", "NODEPTHBUFFER": "NO_DEPTH_BUFFER", "CLAMPU": "CLAMP_U",
+            "VERTEXTEXTURE": "VERTEX_TEXTURE", "SSBUMP": "SSBUMP", "BORDER": "BORDER",
+        }
+        
+        vtf_flags = []
+        for f_prop, f_enum in flag_mapping.items():
+            if getattr(config, f"vtf_flag_{f_prop}", False):
+                vtf_flags.append(VTF_FLAG[f_enum])
+
+        if is_normal and VTF_FLAG.NORMAL not in vtf_flags:
+            vtf_flags.append(VTF_FLAG.NORMAL)
+
+        resize_options = None
+        if getattr(config, "vtf_resize", False):
+            r_method_str = getattr(config, "vtf_rmethod", "NEAREST")
+            method_map = {
+                "NEAREST": RESIZE_METHOD.NEAREST,
+                "BIGGEST": RESIZE_METHOD.BIGGER,
+                "SMALLEST": RESIZE_METHOD.SMALLER
             }
-            vtf_flags = []
-            for f_prop, f_enum in flag_mapping.items():
-                if f_enum and getattr(config, f"vtf_flag_{f_prop}", False):
-                    vtf_flags.append(VTF_FLAG[f_enum])
-            
-            resize_options = None
-            if getattr(config, "vtf_resize", False):
-                try: r_method = RESIZE_METHOD[getattr(config, "vtf_rmethod", "NEAREST")]
-                except KeyError: r_method = RESIZE_METHOD.NEAREST
-                w = getattr(config, "vtf_rwidth", 0)
-                h = getattr(config, "vtf_rheight", 0)
-                resize_options = VTFResizeOptions(
+            r_method = method_map.get(r_method_str, RESIZE_METHOD.NEAREST)
+
+            w = getattr(config, "vtf_rwidth", 0)
+            h = getattr(config, "vtf_rheight", 0)
+
+            if w > 0 or h > 0:
+                resize_options = ResizeOptions(
                     WIDTH=w if w > 0 else None,
                     HEIGHT=h if h > 0 else None,
                     method=r_method
                 )
 
-
-            normal_options = None
-            if is_normal:
-                normal_options = VTFNormalMapOptions(
-                    BUMPSCALE=getattr(config, "vtf_nscale", 2.0),
-                    INVERT_GREEN=False
-                )
-                if VTF_FLAG.NORMAL not in vtf_flags:
-                    vtf_flags.append(VTF_FLAG.NORMAL)
-                    
-            try: filter_enum = RESIZE_FILTER[getattr(config, "vtf_mfilter", "DEFAULT")]
-            except KeyError: filter_enum = RESIZE_FILTER.DEFAULT
-                
-            disable_mips = getattr(config, "vtf_nomipmaps", False)
-            
-            options = VTFConvertOptions(
-                input_path=Path(tga_path),
-                output_path=Path(vtf_path),
-                MODE=MODE.CONVERT,
-                format=fmt_enum,
-                vtf_flags=vtf_flags,
-                filter=filter_enum,
-                resize=resize_options,
-                normal=normal_options,
-                disable_mips=disable_mips,
-                version=VERSION.V7_2
+        normal_options = None
+        if is_normal:
+            normal_options = NormalMapOptions(
+                BUMPSCALE=getattr(config, "vtf_nscale", 2.0),
+                INVERT_GREEN=False
             )
-            vtf_ops = pyvtf_ops()
-            print(f"\n[SourceOps] >>> Executing MareTF via PyVTFlib natively...")
-            vtf_ops.convert(options)
-            
+
+        filter_str = getattr(config, "vtf_mfilter", "DEFAULT")
+        try:
+            filter_enum = RESIZE_FILTER[filter_str]
+        except KeyError:
+            if filter_str == "CATROM": filter_enum = RESIZE_FILTER.CATMULL_ROM
+            else: filter_enum = RESIZE_FILTER.DEFAULT
+
+        disable_mips = getattr(config, "vtf_nomipmaps", False)
+
+        options = CreateVTFOptions(
+            input_path=Path(tga_path),
+            output_path=Path(vtf_path),
+            format=fmt_enum,
+            vtf_flags=vtf_flags,
+            filter=filter_enum,
+            resize=resize_options,
+            normal=normal_options,
+            disable_mips=disable_mips,
+            version=VERSION.V7_2
+        )
+
+        print(f"\n[SourceOps] >>> Executing maretf via PyVTFLib natively for {os.path.basename(vtf_path)}...")
+        try:
+            create(options)
             if os.path.exists(vtf_path):
-                print(f"[SourceOps] -> MareTF Conversion Successful for {os.path.basename(vtf_path)}")
+                print(f"[SourceOps] -> maretf Conversion Successful for {os.path.basename(vtf_path)}")
                 return True
             else:
-                print(f"[SourceOps ERROR] MareTF failed to generate {vtf_path}, falling back to VTFCmd...")
-                
-        except ImportError:
-            print("[SourceOps] PyVTFlib not found or not installed properly, falling back to VTFCmd...")
+                print(f"[SourceOps ERROR] maretf failed to generate {vtf_path}")
+                return False
         except Exception as e:
-            print(f"[SourceOps ERROR] PyVTFlib exception: {e}. Falling back to VTFCmd...")
-
-        # 2. FALLBACK TO VTFCMD IF MARETF FAILS
-        if vtfcmd_executable is None or not os.path.exists(vtfcmd_executable):
-            print("[SourceOps ERROR] VTFCmd is missing and PyVTFlib failed. Cannot convert texture.")
+            print(f"[SourceOps ERROR] PyVTFLib exception: {e}")
             return False
 
-        return self._convert_to_vtf_background(tga_path, vtf_path, vtfcmd_executable, vtf_args, postfix)
-
-
-    def _process_vtf_tasks(self, tga_path, vtf_path, vtf_normal_path, config, vtfcmd_executable, vtf_args_base, vtf_args_normal, generate_normal, addon_dir, mat_clean):
+    def _process_vtf_tasks(self, tga_path, vtf_path, vtf_normal_path, config, generate_normal, addon_dir, mat_clean):
         # 1. Base texture
-        success_base = self._convert_to_vtf(tga_path, vtf_path, config, False, vtfcmd_executable, vtf_args_base)
+        success_base = self._convert_to_vtf(tga_path, vtf_path, config, False)
         if success_base and addon_dir:
             try: shutil.copy2(vtf_path, os.path.join(addon_dir, f"{mat_clean}.vtf"))
             except Exception as e: print(f"[SourceOps] Failed to copy VTF to Addon folder: {e}")
                 
         # 2. Normal texture
         if generate_normal:
-            success_norm = self._convert_to_vtf(tga_path, vtf_normal_path, config, True, vtfcmd_executable, vtf_args_normal, postfix="_normalmap")
+            success_norm = self._convert_to_vtf(tga_path, vtf_normal_path, config, True)
             if success_norm and addon_dir:
                 try: shutil.copy2(vtf_normal_path, os.path.join(addon_dir, f"{mat_clean}_normalmap.vtf"))
                 except Exception as e: print(f"[SourceOps] Failed to copy Normal VTF to Addon folder: {e}")
@@ -442,17 +393,6 @@ class Model:
         print(f"[SourceOps] STARTING MATERIAL EXPORT FOR: {self.name}")
         print(f"[SourceOps] ========================================")
         
-        # FIND NATIVE VTFCMD PATH (FOR FALLBACK)
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        addon_dir_path = os.path.abspath(os.path.join(current_dir, '..', '..'))
-        vtfcmd_lower = os.path.join(addon_dir_path, 'vtfcmd', 'vtfcmd.exe')
-        vtfcmd_upper = os.path.join(addon_dir_path, 'vtfcmd', 'VTFCmd.exe')
-        
-        vtfcmd_path = vtfcmd_lower if os.path.exists(vtfcmd_lower) else vtfcmd_upper
-        if not os.path.exists(vtfcmd_path): 
-            vtfcmd_path = None
-
         addon_name = self.stem
         mat_subfolder = self.material_folder_items[0].name.replace('\\', '/').strip('/') if self.material_folder_items else ''
         
@@ -479,7 +419,7 @@ class Model:
         
         objects = set()
         if self.reference: objects.update(self.get_all_objects(self.reference))
-        for lod_col in[self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, self.lod_4_collection, self.lod_5_collection, self.lod_6_collection]:
+        for lod_col in [self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, self.lod_4_collection, self.lod_5_collection, self.lod_6_collection]:
             if lod_col: objects.update(self.get_all_objects(lod_col))
         if self.bodygroups:
             for bg in self.bodygroups.children:
@@ -642,54 +582,6 @@ class Model:
                     if not vtf_needs_update:
                         print(f"[SourceOps] VTF file(s) exist and Overwrite VTF is OFF. Skipping VTF conversion for {mat_clean}.")
                         continue 
-
-                    # --- BASE TEXTURE VTF ARGUMENTS ---
-                    vtf_args_base =[]
-                    
-                    fmt = getattr(config, "vtf_format", "DXT5")
-                    alpha_fmt = getattr(config, "vtf_alphaformat", "DXT5")
-                        
-                    vtf_args_base.extend(["-format", fmt, "-alphaformat", alpha_fmt])
-                        
-                    flag_names =["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
-                    for f in flag_names:
-                        if getattr(config, f"vtf_flag_{f}", False):
-                            vtf_args_base.extend(["-flag", f])
-                                
-                    if getattr(config, "vtf_resize", False):
-                        vtf_args_base.append("-resize")
-                        vtf_args_base.extend(["-rmethod", getattr(config, "vtf_rmethod", "NEAREST"), "-rfilter", getattr(config, "vtf_rfilter", "BOX"), "-rsharpen", getattr(config, "vtf_rsharpen", "NONE")])
-                        if getattr(config, "vtf_rwidth", 0) > 0: vtf_args_base.extend(["-rwidth", str(getattr(config, "vtf_rwidth"))])
-                        if getattr(config, "vtf_rheight", 0) > 0: vtf_args_base.extend(["-rheight", str(getattr(config, "vtf_rheight"))])
-                        if getattr(config, "vtf_rclampwidth", 0) > 0: vtf_args_base.extend(["-rclampwidth", str(getattr(config, "vtf_rclampwidth"))])
-                        if getattr(config, "vtf_rclampheight", 0) > 0: vtf_args_base.extend(["-rclampheight", str(getattr(config, "vtf_rclampheight"))])
-                            
-                    if getattr(config, "vtf_gamma", False):
-                        vtf_args_base.append("-gamma")
-                        vtf_args_base.extend(["-gcorrection", str(getattr(config, "vtf_gcorrection", 2.2))])
-                            
-                    if getattr(config, "vtf_nomipmaps", False):
-                        vtf_args_base.append("-nomipmaps")
-                    else:
-                        vtf_args_base.extend(["-mfilter", getattr(config, "vtf_mfilter", "KAISER"), "-msharpen", getattr(config, "vtf_msharpen", "SHARPENSOFT")])
-                            
-                    vtf_args_base.extend(["-bumpscale", str(getattr(config, "vtf_bumpscale", 1.0))])
-                    if getattr(config, "vtf_nothumbnail", False): vtf_args_base.append("-nothumbnail")
-                    if getattr(config, "vtf_noreflectivity", False): vtf_args_base.append("-noreflectivity")
-                        
-                    # --- NORMAL MAP VTF ARGUMENTS ---
-                    vtf_args_normal =[]
-                    if generate_normal:
-                        vtf_args_normal = vtf_args_base.copy()
-                        vtf_args_normal.extend([
-                            "-normal", 
-                            "-nkernel", getattr(config, "vtf_nkernel", "3X3"), 
-                            "-nheight", getattr(config, "vtf_nheight", "AVERAGERGB"), 
-                            "-nalpha", getattr(config, "vtf_nalpha", "NOCHANGE"), 
-                            "-nscale", str(getattr(config, "vtf_nscale", 2.0))
-                        ])
-                        if getattr(config, "vtf_nwrap", False): 
-                            vtf_args_normal.append("-nwrap")
                 
                     # --- EXECUTE PROCESSING TASKS ---
                     if img_or_color:
@@ -697,7 +589,7 @@ class Model:
                             print("[SourceOps] Creating Solid Color Binary TGA.")
                             tga_path = str(target_dir.joinpath(f"{mat_clean}.tga"))
                             if self._write_solid_tga(tga_path, img_or_color, alpha_val):
-                                executor.submit(self._process_vtf_tasks, tga_path, str(vtf_path), str(vtf_normal_path), config, vtfcmd_path, vtf_args_base, vtf_args_normal, generate_normal, str(addon_dir) if addon_dir else None, mat_clean)
+                                executor.submit(self._process_vtf_tasks, tga_path, str(vtf_path), str(vtf_normal_path), config, generate_normal, str(addon_dir) if addon_dir else None, mat_clean)
                             else:
                                 print("[SourceOps ERROR] Failed to generate Solid TGA.")
                         else:
@@ -707,7 +599,7 @@ class Model:
                             
                             tga_path = self._save_temp_texture(final_img, str(target_dir), mat_clean)
                             if tga_path:
-                                executor.submit(self._process_vtf_tasks, tga_path, str(vtf_path), str(vtf_normal_path), config, vtfcmd_path, vtf_args_base, vtf_args_normal, generate_normal, str(addon_dir) if addon_dir else None, mat_clean)
+                                executor.submit(self._process_vtf_tasks, tga_path, str(vtf_path), str(vtf_normal_path), config, generate_normal, str(addon_dir) if addon_dir else None, mat_clean)
                             else:
                                 print("[SourceOps ERROR] Failed to save Blender Image to TGA.")
 
@@ -741,7 +633,7 @@ class Model:
             path = self.get_body_path(self.collision)
             self.export_mesh(self.armature, objects, path)
 
-        lods =[self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, 
+        lods = [self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, 
                 self.lod_4_collection, self.lod_5_collection, self.lod_6_collection]
         for lod_col in lods:
             if lod_col:
@@ -764,7 +656,7 @@ class Model:
         print(f"[SourceOps] Mesh Export Completed.\n")
 
     def export_anim(self, armature, action, path):
-        self.export_smd(armature,[], action, path)
+        self.export_smd(armature, [], action, path)
 
     def export_mesh(self, armature, objects, path):
         if self.mesh_type == 'SMD':
@@ -795,7 +687,7 @@ class Model:
             print(f'[SourceOps] Exported: {path} in {round(time.time() - start, 1)} seconds')
 
     def get_all_objects(self, collection):
-        return common.remove_duplicates(collection.all_objects) if collection else[]
+        return common.remove_duplicates(collection.all_objects) if collection else []
 
     def get_body_path(self, collection):
         name = common.clean_filename(collection.name)
@@ -887,7 +779,7 @@ class Model:
             qc.write(f'$body "{name}" "{name}.{self.mesh_type}"')
             qc.write('\n')
 
-        lods =[
+        lods = [
             (self.lod_1_distance, self.lod_1_collection),
             (self.lod_2_distance, self.lod_2_collection),
             (self.lod_3_distance, self.lod_3_collection),
@@ -1053,7 +945,7 @@ class Model:
             if (os.name == 'posix'):
                 cwd = self.game.parent
                 wine_exe = str(self.wine) if str(self.wine) and str(self.wine) != '.' else 'wine'
-                args =[wine_exe, str(self.studiomdl.relative_to(cwd)), '-nop4', '-fullcollide',
+                args = [wine_exe, str(self.studiomdl.relative_to(cwd)), '-nop4', '-fullcollide',
                         '-game', str(self.game.relative_to(cwd)), str(qc.relative_to(cwd))]
             else:
                 if is_plusplus:
@@ -1065,7 +957,7 @@ class Model:
                     # STRICTLY RESTORE THE ORIGINAL, NATIVE CONTEXT FOR DEFAULT STUDIOMDL TO PREVENT -1 CRASHES
                     cwd = None
                     
-                args =[str(self.studiomdl), '-nop4', '-fullcollide', '-game', str(self.game), str(qc)]
+                args = [str(self.studiomdl), '-nop4', '-fullcollide', '-game', str(self.game), str(qc)]
 
             print(f'[SourceOps] Command: {" ".join(args)}')
             print(f'[SourceOps] Working Directory: {cwd if cwd else "Blender Default"}\n')
@@ -1076,7 +968,7 @@ class Model:
                 else:
                     pipe = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=cwd, universal_newlines=True)
 
-                log_output =[]
+                log_output = []
                 # Stream directly to Blender Console in real-time
                 for line in pipe.stdout:
                     print(line, end='')
@@ -1137,11 +1029,11 @@ class Model:
         if os.name == 'posix':
             cwd = self.game.parent
             wine_exe = str(self.wine) if str(self.wine) and str(self.wine) != '.' else 'wine'
-            args =[wine_exe, str(self.hlmv.relative_to(cwd)), '-game',
+            args = [wine_exe, str(self.hlmv.relative_to(cwd)), '-game',
                     str(self.game.relative_to(cwd)), str(mdl.relative_to(cwd))]
         else:
             cwd = None
-            args =[str(self.hlmv), '-game', str(self.game), str(mdl)]
+            args = [str(self.hlmv), '-game', str(self.game), str(mdl)]
 
         if dx90.is_file():
             print(f'[SourceOps] Viewing: {mdl}')
@@ -1166,11 +1058,11 @@ class Model:
         if os.name == 'posix':
             cwd = self.game.parent
             wine_exe = str(self.wine) if str(self.wine) and str(self.wine) != '.' else 'wine'
-            args =[wine_exe, str(self.hlmvplusplus_exe.relative_to(cwd)), '-game',
+            args = [wine_exe, str(self.hlmvplusplus_exe.relative_to(cwd)), '-game',
                     str(self.game.relative_to(cwd)), str(mdl.relative_to(cwd))]
         else:
             cwd = str(self.hlmvplusplus_dir)
-            args =[str(self.hlmvplusplus_exe), '-game', str(self.game), str(mdl)]
+            args = [str(self.hlmvplusplus_exe), '-game', str(self.game), str(mdl)]
 
         if dx90.is_file():
             print(f'[SourceOps] Viewing in HLMV++: {mdl}')
