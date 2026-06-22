@@ -12,7 +12,7 @@
 ## **New Features & Overhauls**
 
 ### **1. Automated Texture & Material Pipeline**
-*   **Integrated Conversion:** Powered by **MareTF**. ReOpped extracts and converts your Blender textures into VTF format automatically when you export.
+*   **Integrated Conversion:** Powered by **MareTF** and **PyVTFlib**. ReOpped extracts and converts your Blender textures into VTF format automatically when you export.
 *   **Smart VMTs:** It generates your `.vmt` files for you but **it won't wipe your manual work**. If you edit a VMT in a text editor, ReOpped is smart enough to preserve those changes on the next export.
 *   **Alpha & Normal Maps:** You get automated **Alpha Baking** (pulled directly from your Blender BSDF sliders) and 1-click **Normal Map** (`_normalmap`) generation.
 
@@ -65,6 +65,7 @@ Just click the **Auto Export** icon (the icon with the car). It runs the whole c
 
 This addon wouldn't work without these great projects:
 *   **MareTF (Texture Conversion):** https://github.com/craftablescience/MareTF
+*   **PyVTFlib (VTF Support):** https://github.com/Glad-BR/PyVTFlib
 *   **V-HACD (Collision Algorithm):** https://github.com/kmammou/v-hacd
 *   **X3D Importer:** Used for native physics data processing.
 
@@ -72,7 +73,7 @@ This addon wouldn't work without these great projects:
 
 ## **Special Thanks**
 
-A huge shoutout to **Glad-BR** for the massive help with the Linux integration for **MareTF** to work on Linux alongside SourceOps ReOpped
+A huge shoutout to **Glad-BR** for the massive help with the Linux integration for **MareTF** and for implementing **PyVTFlib** to work alongside SourceOps ReOpped.
 Check them out: https://github.com/Glad-BR
 
 ---
