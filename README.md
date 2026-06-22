@@ -34,7 +34,8 @@
 ## **Tutorial: How to make Collisions**
 
 If you need a physics mesh that actually fits your model:
-1.  **Select your object** in the viewport.
+1.  **Select your object** in the viewport. 
+    *   **Pro-Tip:** For the best results, it is highly recommended to **generate collisions for separate parts individually**. If your model has multiple distinct pieces, run the tool on each part one by one rather than all at once.
 2.  Press **F3** and search for `SourceOps Collision` (or find it in the **Object** menu at the top).
 3.  In the V-HACD menu, look for **Maximum Concavity**:
     *   **Set it to 0:** Most detailed and accurate (creates more hulls).
