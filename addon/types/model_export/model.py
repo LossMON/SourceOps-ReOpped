@@ -505,14 +505,11 @@ class Model:
                     vtf_path = target_dir.joinpath(f"{mat_clean}.vtf")
                     vtf_normal_path = target_dir.joinpath(f"{mat_clean}_normalmap.vtf")
                     
-                    # Look for explicit UI settings for this specific material in the Skin/Material Lists
+                    # Look for explicit UI settings for this specific material in the Material List
                     mat_config = next((m for m in self.material_items if m.name == mat_clean), None)
-                    skin_config = next((s for s in self.skin_items if s.name == mat_clean), None)
-                    config = skin_config if skin_config else (mat_config if mat_config else self.model_props)
+                    config = mat_config if mat_config else self.model_props
                     
-                    if skin_config:
-                        print(f"[SourceOps] Found Skin override settings for '{mat_clean}'.")
-                    elif mat_config:
+                    if mat_config:
                         print(f"[SourceOps] Found Material override settings for '{mat_clean}'.")
                     else:
                         print(f"[SourceOps] Using Global Model default settings for '{mat_clean}'.")

@@ -7,25 +7,26 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
     bl_label = 'Preview / Edit VMT'
     bl_description = 'Generates the VMT code and opens it in a Text Editor. Your manual edits and UI changes are intelligently combined!'
 
-    # THIS IS THE MISSING VARIABLE THAT CAUSED THE CRASH!
     item_type: bpy.props.StringProperty()
 
     def execute(self, context):
         sourceops = common.get_globals(context)
         model = common.get_model(sourceops)
         
-        # Now it knows how to handle both Skins and Materials!
+        # It now natively defaults back to proper material properties
         if self.item_type == 'SKIN':
-            config = model.skin_items[model.skin_index]
+            skin_item = model.skin_items[model.skin_index]
+            mat_clean = skin_item.name
+            mat_config = next((m for m in model.material_items if m.name == mat_clean), None)
+            config = mat_config if mat_config else model
         else:
             config = model.material_items[model.material_index]
+            mat_clean = config.name
             
-        mat_clean = config.name
-        
         mat_subfolder = model.material_folder_items[0].name.replace('\\', '/').strip('/') if len(model.material_folder_items) > 0 else ''
         basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
 
-        text_name = f"VMT_{config.name}.vmt"
+        text_name = f"VMT_{mat_clean}.vmt"
         existing_text = bpy.data.texts.get(text_name)
         
         # --- SMART MERGER: Extract User's Custom Lines & Edits ---
