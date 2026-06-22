@@ -142,8 +142,10 @@ class Model:
     # VTF/VMT Generation Utilities
     # -------------------------------------------------------------
     def _linear_to_srgb(self, c):
-        if c < 0.0031308: return c * 12.92
-        else: return 1.055 * (c ** (1.0 / 2.4)) - 0.055
+        if c < 0.0031308: 
+            return c * 12.92
+        else: 
+            return 1.055 * (c ** (1.0 / 2.4)) - 0.055
 
     def _write_solid_tga(self, filepath, color, alpha_val):
         """Writes a perfect raw TGA file using Python to completely bypass Blender's color management bugs"""
@@ -170,7 +172,8 @@ class Model:
             return False
 
     def _get_material_texture_data(self, mat):
-        if not mat or not mat.use_nodes: return None, False, 1.0, 0.5, False
+        if not mat or not mat.use_nodes: 
+            return None, False, 1.0, 0.5, False
         
         alpha_val = 1.0
         roughness_val = 0.5
@@ -270,129 +273,176 @@ class Model:
         finally:
             settings.file_format, settings.color_mode, scene.view_settings.view_transform = orig_fmt, orig_mode, orig_vt
         return temp_path
+    
+    def _generate_normal_map_image(self, image, scale=2.0, wrap=False):
+        """Converts a diffuse/heightmap image to a DirectX format normal map (Y-Down) using python"""
+        width, height = image.size
+        
+        try:
+            import numpy as np
+            pixels = np.empty(width * height * 4, dtype=np.float32)
+            image.pixels.foreach_get(pixels)
+            pixels = pixels.reshape((height, width, 4))
+            
+            lum = np.mean(pixels[:, :, :3], axis=2)
+            
+            if wrap:
+                dx = np.roll(lum, -1, axis=1) - np.roll(lum, 1, axis=1)
+                dy = np.roll(lum, -1, axis=0) - np.roll(lum, 1, axis=0)
+            else:
+                dx = np.zeros_like(lum)
+                dy = np.zeros_like(lum)
+                dx[:, 1:-1] = lum[:, 2:] - lum[:, :-2]
+                dx[:, 0] = lum[:, 1] - lum[:, 0]
+                dx[:, -1] = lum[:, -1] - lum[:, -2]
+                
+            dx *= scale * 0.5
+            dy *= scale * 0.5
+            
+            # Calculate DirectX Normals (-Y Down)
+            nx = -dx
+            ny = -dy
+            nz = np.ones_like(lum)
+            
+            length = np.sqrt(nx**2 + ny**2 + nz**2)
+            
+            normal_pixels = np.empty((height, width, 4), dtype=np.float32)
+            normal_pixels[:, :, 0] = nx / length * 0.5 + 0.5
+            normal_pixels[:, :, 1] = ny / length * 0.5 + 0.5
+            normal_pixels[:, :, 2] = nz / length * 0.5 + 0.5
+            normal_pixels[:, :, 3] = 1.0
+            
+            flat_pixels = normal_pixels.flatten()
+        except ImportError:
+            print("[SourceOps WARNING] numpy not found! Outputting flat normal map.")
+            flat_pixels = [0.5, 0.5, 1.0, 1.0] * (width * height)
+
+        new_img = bpy.data.images.new(name=f"{image.name}_normal_temp", width=width, height=height, alpha=False)
+        new_img.pixels.foreach_set(flat_pixels)
+        new_img.update()
+        return new_img
         
     def _convert_to_vtf(self, tga_path, vtf_path, config, is_normal):
+        # ATTEMPT NATIVE PYVTFLIB (MareTF)
         try:
-            from ...PyVTFlib import create, CreateVTFOptions, FORMAT, VTF_FLAG, NormalMapOptions, ResizeOptions, RESIZE_METHOD, RESIZE_FILTER, VERSION
-        except ImportError as e:
-            print(f"[SourceOps ERROR] Failed to import PyVTFLib: {e}")
-            return False
-
-        fmt_str = getattr(config, "vtf_format", "DXT5")
-        try:
-            fmt_enum = FORMAT[fmt_str]
-        except KeyError:
-            fmt_enum = FORMAT.DXT5
-
-        flag_mapping = {
-            "POINTSAMPLE": "POINT_SAMPLE", "TRILINEAR": "TRILINEAR", "CLAMPS": "CLAMP_S",
-            "CLAMPT": "CLAMP_T", "ANISOTROPIC": "ANISOTROPIC", "NORMAL": "NORMAL",
-            "NOLOD": "NO_LOD", "PROCEDURAL": "PROCEDURAL", "RENDERTARGET": "RENDERTARGET",
-            "DEPTHRENDERTARGET": "DEPTH_RENDERTARGET", "NODEBUGOVERRIDE": "NO_DEBUG_OVERRIDE",
-            "SINGLECOPY": "SINGLE_COPY", "NODEPTHBUFFER": "NO_DEPTH_BUFFER", "CLAMPU": "CLAMP_U",
-            "VERTEXTEXTURE": "VERTEX_TEXTURE", "SSBUMP": "SSBUMP", "BORDER": "BORDER",
-        }
-        
-        vtf_flags = []
-        for f_prop, f_enum in flag_mapping.items():
-            if getattr(config, f"vtf_flag_{f_prop}", False):
-                vtf_flags.append(VTF_FLAG[f_enum])
-
-        if is_normal and VTF_FLAG.NORMAL not in vtf_flags:
-            vtf_flags.append(VTF_FLAG.NORMAL)
-
-        resize_options = None
-        if getattr(config, "vtf_resize", False):
-            r_method_str = getattr(config, "vtf_rmethod", "NEAREST")
-            method_map = {
-                "NEAREST": RESIZE_METHOD.NEAREST,
-                "BIGGEST": RESIZE_METHOD.BIGGER,
-                "SMALLEST": RESIZE_METHOD.SMALLER
+            from ...PyVTFlib import ops as pyvtf_ops, VTFConvertOptions, IMAGE_FORMAT, VTF_FLAG, VTFResizeOptions, RESIZE_METHOD, RESIZE_FILTER, MODE, VERSION
+            
+            fmt_str = getattr(config, "vtf_format", "DXT5")
+            try: 
+                fmt_enum = IMAGE_FORMAT[fmt_str]
+            except KeyError: 
+                fmt_enum = IMAGE_FORMAT.DXT5
+                
+            flag_mapping = {
+                "POINTSAMPLE": "POINT_SAMPLE", "TRILINEAR": "TRILINEAR", "CLAMPS": "CLAMP_S",
+                "CLAMPT": "CLAMP_T", "ANISOTROPIC": "ANISOTROPIC", "NORMAL": "NORMAL",
+                "NOLOD": "NO_LOD", "PROCEDURAL": "PROCEDURAL", "RENDERTARGET": "RENDERTARGET",
+                "DEPTHRENDERTARGET": "DEPTH_RENDERTARGET", "NODEBUGOVERRIDE": "NO_DEBUG_OVERRIDE",
+                "SINGLECOPY": "SINGLE_COPY", "NODEPTHBUFFER": "NO_DEPTH_BUFFER", "CLAMPU": "CLAMP_U",
+                "VERTEXTEXTURE": "VERTEX_TEXTURE", "SSBUMP": "SSBUMP", "BORDER": "BORDER",
             }
-            r_method = method_map.get(r_method_str, RESIZE_METHOD.NEAREST)
-
-            w = getattr(config, "vtf_rwidth", 0)
-            h = getattr(config, "vtf_rheight", 0)
-
-            if w > 0 or h > 0:
-                resize_options = ResizeOptions(
+            
+            vtf_flags = []
+            for f_prop, f_enum in flag_mapping.items():
+                if f_enum and getattr(config, f"vtf_flag_{f_prop}", False):
+                    vtf_flags.append(VTF_FLAG[f_enum])
+            
+            resize_options = None
+            if getattr(config, "vtf_resize", False):
+                try: 
+                    r_method = RESIZE_METHOD[getattr(config, "vtf_rmethod", "NEAREST")]
+                except KeyError: 
+                    r_method = RESIZE_METHOD.NEAREST
+                w = getattr(config, "vtf_rwidth", 0)
+                h = getattr(config, "vtf_rheight", 0)
+                resize_options = VTFResizeOptions(
                     WIDTH=w if w > 0 else None,
                     HEIGHT=h if h > 0 else None,
                     method=r_method
                 )
 
-        normal_options = None
-        if is_normal:
-            normal_options = NormalMapOptions(
-                BUMPSCALE=getattr(config, "vtf_nscale", 2.0),
-                INVERT_GREEN=False
+            # Ensure NORMAL flag is set when dealing with the normal map specifically
+            if is_normal and VTF_FLAG.NORMAL not in vtf_flags:
+                vtf_flags.append(VTF_FLAG.NORMAL)
+                    
+            try: 
+                filter_enum = RESIZE_FILTER[getattr(config, "vtf_mfilter", "DEFAULT")]
+            except KeyError: 
+                filter_enum = RESIZE_FILTER.DEFAULT
+                
+            disable_mips = getattr(config, "vtf_nomipmaps", False)
+            
+            options = VTFConvertOptions(
+                input_path=Path(tga_path),
+                output_path=Path(vtf_path),
+                MODE=MODE.CONVERT,
+                format=fmt_enum,
+                vtf_flags=vtf_flags,
+                filter=filter_enum,
+                resize=resize_options,
+                normal=None, # Already baked inside python! Avoid double scaling/inversions
+                disable_mips=disable_mips,
+                version=VERSION.V7_2
             )
-
-        filter_str = getattr(config, "vtf_mfilter", "DEFAULT")
-        try:
-            filter_enum = RESIZE_FILTER[filter_str]
-        except KeyError:
-            if filter_str == "CATROM": filter_enum = RESIZE_FILTER.CATMULL_ROM
-            else: filter_enum = RESIZE_FILTER.DEFAULT
-
-        disable_mips = getattr(config, "vtf_nomipmaps", False)
-
-        options = CreateVTFOptions(
-            input_path=Path(tga_path),
-            output_path=Path(vtf_path),
-            format=fmt_enum,
-            vtf_flags=vtf_flags,
-            filter=filter_enum,
-            resize=resize_options,
-            normal=normal_options,
-            disable_mips=disable_mips,
-            version=VERSION.V7_2
-        )
-
-        print(f"\n[SourceOps] >>> Executing maretf via PyVTFLib natively for {os.path.basename(vtf_path)}...")
-        try:
-            create(options)
+            vtf_ops = pyvtf_ops()
+            
+            print(f"\n[SourceOps] >>> Executing MareTF via PyVTFlib natively for '{os.path.basename(tga_path)}'...")
+            vtf_ops.convert(options)
+            
             if os.path.exists(vtf_path):
-                print(f"[SourceOps] -> maretf Conversion Successful for {os.path.basename(vtf_path)}")
+                print(f"[SourceOps] -> MareTF Conversion Successful for {os.path.basename(vtf_path)}")
                 return True
             else:
-                print(f"[SourceOps ERROR] maretf failed to generate {vtf_path}")
+                print(f"[SourceOps ERROR] MareTF failed to generate {vtf_path}")
                 return False
+                
         except Exception as e:
-            print(f"[SourceOps ERROR] PyVTFLib exception: {e}")
+            print(f"[SourceOps ERROR] PyVTFlib MareTF execution failed exception: {e}")
             return False
 
-    def _process_vtf_tasks(self, tga_path, vtf_path, vtf_normal_path, config, generate_normal, addon_dir, mat_clean):
+    def _process_vtf_tasks(self, tga_path, vtf_path, tga_normal_path, vtf_normal_path, config, generate_normal, addon_dir, mat_clean):
         # 1. Base texture
-        success_base = self._convert_to_vtf(tga_path, vtf_path, config, False)
-        if success_base and addon_dir:
-            try: shutil.copy2(vtf_path, os.path.join(addon_dir, f"{mat_clean}.vtf"))
-            except Exception as e: print(f"[SourceOps] Failed to copy VTF to Addon folder: {e}")
+        if tga_path:
+            success_base = self._convert_to_vtf(tga_path, vtf_path, config, False)
+            if success_base and addon_dir:
+                try: 
+                    shutil.copy2(vtf_path, os.path.join(addon_dir, f"{mat_clean}.vtf"))
+                except Exception as e: 
+                    print(f"[SourceOps] Failed to copy VTF to Addon folder: {e}")
+            
+            # Cleanup TGA safely
+            try: 
+                os.remove(tga_path)
+            except: 
+                pass
                 
         # 2. Normal texture
-        if generate_normal:
-            success_norm = self._convert_to_vtf(tga_path, vtf_normal_path, config, True)
+        if generate_normal and tga_normal_path:
+            success_norm = self._convert_to_vtf(tga_normal_path, vtf_normal_path, config, True)
             if success_norm and addon_dir:
-                try: shutil.copy2(vtf_normal_path, os.path.join(addon_dir, f"{mat_clean}_normalmap.vtf"))
-                except Exception as e: print(f"[SourceOps] Failed to copy Normal VTF to Addon folder: {e}")
+                try: 
+                    shutil.copy2(vtf_normal_path, os.path.join(addon_dir, f"{mat_clean}_normalmap.vtf"))
+                except Exception as e: 
+                    print(f"[SourceOps] Failed to copy Normal VTF to Addon folder: {e}")
             
-        # 3. Cleanup TGA safely
-        try: 
-            os.remove(tga_path)
-            print(f"[SourceOps] Deleted temporary file: {os.path.basename(tga_path)}")
-        except Exception as e: 
-            pass
+            # Cleanup Normal TGA safely
+            try: 
+                os.remove(tga_normal_path)
+            except: 
+                pass
 
     def _cleanup_image(self, image):
         try:
-            if image and image.name in bpy.data.images: bpy.data.images.remove(image)
-        except: pass
+            if image and image.name in bpy.data.images: 
+                bpy.data.images.remove(image)
+        except: 
+            pass
 
     def export_materials_func(self, use_addon_folder, global_processed_materials_clean=None):
         print(f"\n[SourceOps] ========================================")
         print(f"[SourceOps] STARTING MATERIAL EXPORT FOR: {self.name}")
         print(f"[SourceOps] ========================================")
-        
+
         addon_name = self.stem
         mat_subfolder = self.material_folder_items[0].name.replace('\\', '/').strip('/') if self.material_folder_items else ''
         
@@ -418,12 +468,15 @@ class Model:
         addon_dir = None
         
         objects = set()
-        if self.reference: objects.update(self.get_all_objects(self.reference))
+        if self.reference: 
+            objects.update(self.get_all_objects(self.reference))
         for lod_col in [self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, self.lod_4_collection, self.lod_5_collection, self.lod_6_collection]:
-            if lod_col: objects.update(self.get_all_objects(lod_col))
+            if lod_col: 
+                objects.update(self.get_all_objects(lod_col))
         if self.bodygroups:
             for bg in self.bodygroups.children:
-                for col in bg.children: objects.update(self.get_all_objects(col))
+                for col in bg.children: 
+                    objects.update(self.get_all_objects(col))
         
         if global_processed_materials_clean is None:
             global_processed_materials_clean = set()
@@ -432,15 +485,18 @@ class Model:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=getattr(self, 'max_threads', 6)) as executor:
             for obj in objects:
-                if obj.type != 'MESH': continue
+                if obj.type != 'MESH': 
+                    continue
                 for mat in obj.data.materials:
-                    if not mat: continue
+                    if not mat: 
+                        continue
                     
                     mat_clean = re.sub(r'\.\d{3}$', '', mat.name).replace(" ", "_")
                     mat_clean = re.sub(r'[\\/*?:"<>|]', "", mat_clean)
                     
                     cache_key = (mat_clean, str(target_dir))
-                    if cache_key in global_processed_materials_clean: continue
+                    if cache_key in global_processed_materials_clean: 
+                        continue
                     global_processed_materials_clean.add(cache_key)
                     
                     print(f"\n[SourceOps] Processing Material: '{mat.name}' -> Output Name: '{mat_clean}'")
@@ -481,15 +537,19 @@ class Model:
                             lines_to_parse = [line.body for line in custom_text.lines]
                         elif vmt_path.is_file():
                             try:
-                                with open(vmt_path, 'r') as f: lines_to_parse = f.readlines()
-                            except: pass
+                                with open(vmt_path, 'r') as f: 
+                                    lines_to_parse = f.readlines()
+                            except: 
+                                pass
                             
                         for raw_line in lines_to_parse:
                             stripped = raw_line.strip()
-                            if stripped == "{" or stripped == "}": continue
+                            if stripped == "{" or stripped == "}": 
+                                continue
                             
                             clean_shader = stripped.replace('"', '').lower()
-                            if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: continue
+                            if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
+                                continue
                                     
                             is_controlled = False
                             if stripped:
@@ -501,8 +561,10 @@ class Model:
                             if not is_controlled:
                                 custom_lines.append(raw_line.rstrip('\n'))
                                 
-                        while custom_lines and not custom_lines[0].strip(): custom_lines.pop(0)
-                        while custom_lines and not custom_lines[-1].strip(): custom_lines.pop()
+                        while custom_lines and not custom_lines[0].strip(): 
+                            custom_lines.pop(0)
+                        while custom_lines and not custom_lines[-1].strip(): 
+                            custom_lines.pop()
 
                         def get_line(key, default_str):
                             if key in user_overrides:
@@ -523,7 +585,8 @@ class Model:
                             get_line("$basetexture", f'    "$basetexture" "{basetexture_path}"'),
                         ]
                         
-                        if generate_normal: vmt_lines.append(get_line("$bumpmap", f'    "$bumpmap" "{basetexture_path}_normalmap"'))
+                        if generate_normal: 
+                            vmt_lines.append(get_line("$bumpmap", f'    "$bumpmap" "{basetexture_path}_normalmap"'))
                         
                         vmt_lines.append(get_line("$surfaceprop", f'    "$surfaceprop" "{self.surface}"'))
                         vmt_lines.append(get_line("$model", '    "$model" 1'))
@@ -535,14 +598,19 @@ class Model:
                             vmt_trans = True
                             vmt_alpha = False
                             
-                        if vmt_trans: vmt_lines.append(get_line("$translucent", '    "$translucent" 1'))
-                        if vmt_alpha: vmt_lines.append(get_line("$alphatest", '    "$alphatest" 1'))
+                        if vmt_trans: 
+                            vmt_lines.append(get_line("$translucent", '    "$translucent" 1'))
+                        if vmt_alpha: 
+                            vmt_lines.append(get_line("$alphatest", '    "$alphatest" 1'))
                             
-                        if getattr(config, "vmt_nocull", False): vmt_lines.append(get_line("$nocull", '    "$nocull" 1'))
+                        if getattr(config, "vmt_nocull", False): 
+                            vmt_lines.append(get_line("$nocull", '    "$nocull" 1'))
                         
                         if getattr(config, "vmt_envmap", False):
-                            if generate_normal: vmt_lines.append(get_line("$envmap", f'    "$envmap" "{basetexture_path}_normalmap"'))
-                            else: vmt_lines.append(get_line("$envmap", '    "$envmap" "env_cubemap"'))
+                            if generate_normal: 
+                                vmt_lines.append(get_line("$envmap", f'    "$envmap" "{basetexture_path}_normalmap"'))
+                            else: 
+                                vmt_lines.append(get_line("$envmap", '    "$envmap" "env_cubemap"'))
                             vmt_lines.append(get_line("$normalmapalphaenvmapmask", '    "$normalmapalphaenvmapmask" 1'))
                             vmt_lines.append(get_line("$envmaptint", '    "$envmaptint" "[.3 .3 .3]"'))
                             vmt_lines.append(get_line("$reflectivity", '    "$reflectivity" "[1 1 1]"'))
@@ -553,8 +621,10 @@ class Model:
                             vmt_lines.append('')
                             for cl in custom_lines:
                                 if cl.strip():
-                                    if not cl.startswith(' ') and not cl.startswith('\t'): vmt_lines.append(f'    {cl}')
-                                    else: vmt_lines.append(cl)
+                                    if not cl.startswith(' ') and not cl.startswith('\t'): 
+                                        vmt_lines.append(f'    {cl}')
+                                    else: 
+                                        vmt_lines.append(cl)
                                 else:
                                     vmt_lines.append('')
                                 
@@ -574,36 +644,59 @@ class Model:
 
                     # --- VTF OVERWRITE LOGIC ---
                     vtf_needs_update = self.overwrite_vtf or not vtf_path.is_file()
-                    
                     generate_normal = getattr(config, "vtf_normal_map", False)
+                    
                     if generate_normal and not vtf_normal_path.is_file():
                         vtf_needs_update = True
                         
                     if not vtf_needs_update:
                         print(f"[SourceOps] VTF file(s) exist and Overwrite VTF is OFF. Skipping VTF conversion for {mat_clean}.")
                         continue 
-                
+
                     # --- EXECUTE PROCESSING TASKS ---
                     if img_or_color:
+                        tga_path = None
+                        tga_normal_path = None
+                        
                         if is_gen:
                             print("[SourceOps] Creating Solid Color Binary TGA.")
                             tga_path = str(target_dir.joinpath(f"{mat_clean}.tga"))
-                            if self._write_solid_tga(tga_path, img_or_color, alpha_val):
-                                executor.submit(self._process_vtf_tasks, tga_path, str(vtf_path), str(vtf_normal_path), config, generate_normal, str(addon_dir) if addon_dir else None, mat_clean)
-                            else:
+                            if not self._write_solid_tga(tga_path, img_or_color, alpha_val):
+                                tga_path = None
                                 print("[SourceOps ERROR] Failed to generate Solid TGA.")
+                                
+                            if generate_normal:
+                                tga_normal_path = str(target_dir.joinpath(f"{mat_clean}_normalmap.tga"))
+                                self._write_solid_tga(tga_normal_path, [0.5, 0.5, 1.0], 1.0)
                         else:
                             bake_alpha = alpha_val if not is_gen else 1.0
                             print(f"[SourceOps] Saving Image Texture TGA (Alpha Multiplier: {bake_alpha}).")
                             final_img, was_modified = self._prepare_image_for_export(img_or_color, max_size=4096, alpha_val=bake_alpha)
                             
                             tga_path = self._save_temp_texture(final_img, str(target_dir), mat_clean)
-                            if tga_path:
-                                executor.submit(self._process_vtf_tasks, tga_path, str(vtf_path), str(vtf_normal_path), config, generate_normal, str(addon_dir) if addon_dir else None, mat_clean)
-                            else:
-                                print("[SourceOps ERROR] Failed to save Blender Image to TGA.")
+                            
+                            if generate_normal:
+                                print(f"[SourceOps] Generating Normal Map from Diffuse Image...")
+                                nmap_img = self._generate_normal_map_image(final_img, scale=getattr(config, "vtf_nscale", 2.0), wrap=getattr(config, "vtf_nwrap", False))
+                                if nmap_img:
+                                    tga_normal_path = self._save_temp_texture(nmap_img, str(target_dir), f"{mat_clean}_normalmap")
+                                    self._cleanup_image(nmap_img)
+                                else:
+                                    print("[SourceOps ERROR] Failed to generate Normal Map Image.")
 
-                            if was_modified: self._cleanup_image(final_img)
+                            if was_modified: 
+                                self._cleanup_image(final_img)
+
+                        if tga_path or tga_normal_path:
+                            executor.submit(
+                                self._process_vtf_tasks, 
+                                tga_path, str(vtf_path), 
+                                tga_normal_path, str(vtf_normal_path), 
+                                config, generate_normal, 
+                                str(addon_dir) if addon_dir else None, mat_clean
+                            )
+                        else:
+                            print("[SourceOps ERROR] Failed to prepare TGAs for VTF conversion.")
 
         print(f"[SourceOps] ========================================")
         print(f"[SourceOps] COMPLETED MATERIAL EXPORT FOR: {self.name}")
@@ -633,8 +726,11 @@ class Model:
             path = self.get_body_path(self.collision)
             self.export_mesh(self.armature, objects, path)
 
-        lods = [self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, 
-                self.lod_4_collection, self.lod_5_collection, self.lod_6_collection]
+        lods = [
+            self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, 
+            self.lod_4_collection, self.lod_5_collection, self.lod_6_collection
+        ]
+        
         for lod_col in lods:
             if lod_col:
                 objects = self.get_all_objects(lod_col)
@@ -653,6 +749,7 @@ class Model:
                 objects = self.get_all_objects(collection)
                 path = self.get_body_path(collection)
                 self.export_mesh(self.armature, objects, path)
+                
         print(f"[SourceOps] Mesh Export Completed.\n")
 
     def export_anim(self, armature, action, path):
@@ -711,35 +808,27 @@ class Model:
         except:
             return self.report(f'Failed to open: {path}', exception=True)
 
-        qc.write(f'$modelname "{self.name}"')
-        qc.write('\n')
+        qc.write(f'$modelname "{self.name}"\n\n')
 
         # FIX: Ensure paths always have a trailing slash for proper engine resolution
         if not self.material_folder_items:
-            qc.write('\n')
-            qc.write('$cdmaterials ""\n')
+            qc.write('$cdmaterials ""\n\n')
         else:
             for material_folder in self.material_folder_items:
-                qc.write('\n')
                 folder_name = material_folder.name.replace('\\', '/').strip('/')
                 if folder_name:
                     qc.write(f'$cdmaterials "{folder_name}/"\n')
                 else:
                     qc.write('$cdmaterials ""\n')
+            qc.write('\n')
 
-        qc.write('\n')
-        qc.write(f'$surfaceprop "{self.surface}"')
-        qc.write('\n')
+        qc.write(f'$surfaceprop "{self.surface}"\n')
 
         if self.glass:
-            qc.write('\n')
-            qc.write('$mostlyopaque')
-            qc.write('\n')
+            qc.write('\n$mostlyopaque\n')
 
         if self.static:
-            qc.write('\n')
-            qc.write('$staticprop')
-            qc.write('\n')
+            qc.write('\n$staticprop\n')
 
         if self.origin_source == 'MANUAL':
             origin_x = self.origin_x
@@ -765,19 +854,13 @@ class Model:
             rotation -= 90
 
         if not (self.static and self.static_prop_combine):
-            qc.write('\n')
-            qc.write(f'$origin {origin_x:.6f} {origin_y:.6f} {origin_z:.6f} {rotation:.6f}')
-            qc.write('\n')
+            qc.write(f'\n$origin {origin_x:.6f} {origin_y:.6f} {origin_z:.6f} {rotation:.6f}\n')
 
-        qc.write('\n')
-        qc.write(f'$scale {self.scale:.6f}')
-        qc.write('\n')
+        qc.write(f'\n$scale {self.scale:.6f}\n')
 
         if self.reference:
-            qc.write('\n')
             name = common.clean_filename(self.reference.name)
-            qc.write(f'$body "{name}" "{name}.{self.mesh_type}"')
-            qc.write('\n')
+            qc.write(f'\n$body "{name}" "{name}.{self.mesh_type}"\n')
 
         lods = [
             (self.lod_1_distance, self.lod_1_collection),
@@ -790,8 +873,7 @@ class Model:
         has_lods = any([col for dist, col in lods])
 
         if self.reference and has_lods:
-            qc.write('\n')
-            qc.write('// --- LOD SECTION ---\n')
+            qc.write('\n// --- LOD SECTION ---\n')
             for dist, lod_col in lods:
                 if lod_col:
                     qc.write(f'$lod {dist}\n')
@@ -803,49 +885,38 @@ class Model:
             qc.write('// -------------------\n')
 
         if not self.rename_material == '':
-            qc.write('\n')
-            qc.write(f'$renamematerial {self.rename_material}')
-            qc.write('\n')
+            qc.write(f'\n$renamematerial {self.rename_material}\n')
 
         if self.collision:
-            qc.write('\n')
             name = common.clean_filename(self.collision.name)
             command = 'collisionjoints' if self.joints else 'collisionmodel'
-            qc.write(f'${command} "{name}.{self.mesh_type}"' + ' {\n')
+            qc.write(f'\n${command} "{name}.{self.mesh_type}" {{\n')
             command = 'concaveperjoint' if self.joints else 'concave'
             qc.write(f'    ${command}\n')
             command = f'mass {self.mass}' if self.mass > 0 else 'automass'
             qc.write(f'    ${command}\n')
             qc.write('    $maxconvexpieces 10000\n')
-            qc.write('}')
-            qc.write('\n')
+            qc.write('}\n')
 
         if self.bodygroups:
             for bodygroup in self.bodygroups.children:
-                qc.write('\n')
                 bodygroup_name = common.clean_filename(bodygroup.name)
-                qc.write(f'$bodygroup "{bodygroup_name}"' + ' {\n')
+                qc.write(f'\n$bodygroup "{bodygroup_name}" {{\n')
                 for collection in bodygroup.children:
                     name = common.clean_filename(collection.name)
                     qc.write(f'    studio "{name}.{self.mesh_type}"\n')
-                qc.write('}')
-                qc.write('\n')
+                qc.write('}\n')
 
         if self.stacking:
             for collection in self.stacking.children:
-                qc.write('\n')
                 name = common.clean_filename(collection.name)
-                qc.write(f'$model "{name}" "{name}.{self.mesh_type}"')
-                qc.write('\n')
+                qc.write(f'\n$model "{name}" "{name}.{self.mesh_type}"\n')
 
         if not self.sequence_items:
-            qc.write('\n')
-            qc.write(f'$sequence "idle" "anims/idle.SMD"')
-            qc.write('\n')
+            qc.write('\n$sequence "idle" "anims/idle.SMD"\n')
 
         for sequence in self.sequence_items:
-            qc.write('\n')
-            qc.write(f'$sequence "{sequence.name}"' + ' {\n')
+            qc.write(f'\n$sequence "{sequence.name}" {{\n')
             qc.write(f'    "anims/{common.clean_filename(sequence.name)}.SMD"\n')
             if sequence.use_framerate:
                 qc.write(f'    fps {sequence.framerate}\n')
@@ -859,72 +930,52 @@ class Model:
                 qc.write('    loop\n')
             qc.write(f'    activity "{sequence.activity}" {sequence.weight}\n')
             for event in sequence.event_items:
-                qc.write('    { ' + f'event "{event.event}" {event.frame} "{event.value}"' + ' }\n')
-            qc.write('}')
-            qc.write('\n')
+                qc.write(f'    {{ event "{event.event}" {event.frame} "{event.value}" }}\n')
+            qc.write('}\n')
 
         for attachment in self.attachment_items:
             if self.armature and attachment.bone:
-                qc.write('\n')
-                qc.write(f'$attachment "{attachment.name}"')
-                if self.prepend_armature:
-                    qc.write(f' "{self.armature.name}.{attachment.bone}"')
-                else:
-                    qc.write(f' "{attachment.bone}"')
-                qc.write(f' {attachment.offset[0]} {attachment.offset[1]} {attachment.offset[2]}')
+                bone_name = f"{self.armature.name}.{attachment.bone}" if self.prepend_armature else attachment.bone
+                qc.write(f'\n$attachment "{attachment.name}" "{bone_name}" {attachment.offset[0]} {attachment.offset[1]} {attachment.offset[2]}')
+                
                 if attachment.absolute:
                     qc.write(' absolute')
                 if attachment.rigid:
                     qc.write(' rigid')
-                qc.write(f' rotate {attachment.rotation[0]} {attachment.rotation[1]} {attachment.rotation[2]}')
-                qc.write('\n')
+                qc.write(f' rotate {attachment.rotation[0]} {attachment.rotation[1]} {attachment.rotation[2]}\n')
 
         if self.skin_items:
-            qc.write('\n')
-            qc.write('$texturegroup "skinfamilies"')
-            qc.write('\n')
-            qc.write('{')
+            qc.write('\n$texturegroup "skinfamilies"\n')
+            qc.write('{\n')
 
             for skin in self.skin_items:
-                qc.write('\n')
                 skin_str = f'"{skin.name}"'
                 linked_mats = getattr(skin, "linked_materials", "").strip()
                 if linked_mats:
                     for l_mat in linked_mats.split():
                         if l_mat:
                             skin_str += f' "{l_mat}"'
-                qc.write(f'    {{ {skin_str} }}')
+                qc.write(f'    {{ {skin_str} }}\n')
 
-            qc.write('\n')
-            qc.write('}')
-            qc.write('\n')
+            qc.write('}\n')
         
-        if(len(self.particle_items) > 0):
-            qc.write('\n')      
-            qc.write('$keyvalues')
-            qc.write('\n')
-            qc.write('{')
-            qc.write('\n')
-            qc.write('    particles')
-            qc.write('\n')
-            qc.write('    {')
+        if len(self.particle_items) > 0:
+            qc.write('\n$keyvalues\n')
+            qc.write('{\n')
+            qc.write('    particles\n')
+            qc.write('    {\n')
             
             for index, particle in enumerate(self.particle_items):
-                qc.write('\n')
-                qc.write(f'        "effect{index}"')
-                qc.write('\n        {\n')
-                qc.write(f'            "name" "{particle.name}"')
-                qc.write('\n')
-                qc.write(f'            "attachment_type" "{particle.attachment_type}"')
-                qc.write('\n')
-                if(particle.attachment_point):
-                    qc.write(f'            "attachment_point" "{particle.attachment_point}"')
-                    qc.write('\n')
+                qc.write(f'        "effect{index}"\n')
+                qc.write('        {\n')
+                qc.write(f'            "name" "{particle.name}"\n')
+                qc.write(f'            "attachment_type" "{particle.attachment_type}"\n')
+                if particle.attachment_point:
+                    qc.write(f'            "attachment_point" "{particle.attachment_point}"\n')
                 qc.write('        }\n')
             
-            qc.write('    }')
-            qc.write('\n')
-            qc.write('}')
+            qc.write('    }\n')
+            qc.write('}\n')
         
         qc.close()
         print(f"[SourceOps] QC Generation Completed.\n")
@@ -1091,8 +1142,10 @@ class Model:
 
             if src.is_file():
                 if dst.is_file():
-                    try: dst.unlink()
-                    except Exception as e: print(f'[SourceOps ERROR] Failed to delete existing {dst}: {e}')
+                    try: 
+                        dst.unlink()
+                    except Exception as e: 
+                        print(f'[SourceOps ERROR] Failed to delete existing {dst}: {e}')
                 try: 
                     move(src, dst)
                     print(f'[SourceOps] Moved: {dst.name}')
@@ -1120,9 +1173,12 @@ class Model:
         for suffix in ('.dx90.vtx', '.dx80.vtx', '.sw.vtx', '.vvd', '.mdl', '.phy'):
             path = path_dst.with_suffix(suffix)
             if path.is_file(): 
-                try: path.unlink()
-                except Exception as e: print(f'[SourceOps ERROR] Failed to remove old file {path}: {e}')
+                try: 
+                    path.unlink()
+                except Exception as e: 
+                    print(f'[SourceOps ERROR] Failed to remove old file {path}: {e}')
 
     def report(self, message, exception=False):
-        if exception: print_exc()
+        if exception: 
+            print_exc()
         return message
