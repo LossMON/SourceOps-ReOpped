@@ -1,0 +1,4 @@
+[submodule "addon/PyVTFlib"]
+	path = addon/PyVTFlib
+	url = https://github.com/Glad-BR/PyVTFlib.git
+	branch = Release
