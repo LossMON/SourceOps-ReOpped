@@ -2,8 +2,29 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 
+# Idk what this does, hope it's not important
+#class FLAG_EXTRA(Enum):
+#    USING_PREMULTIPLIED_ALPHA_RESIZE = auto()
+
+#class HDRI_MODE(Enum):
+#    FLAT = auto()
+#    CUBEMAP = auto()
+#    SKYBOX = auto()
+
+#class HOTSPOT_RECT_FLAGS(Enum):
+#    RANDOM_ROTATION = auto()
+#    RANDOM_REFLECTION = auto()
+#    IS_ALTERNATE = auto()
+
+#class RESIZE_EDGE(Enum):
+#    CLAMP = auto()
+#    REFLECT = auto()
+#    WRAP = auto()
+#    ZERO = auto()
+
+
 #Enums
-class IMAGE_FORMAT(Enum):
+class FORMAT(Enum):
     UNCHANGED = auto()
     DEFAULT = auto()
     RGBA8888 = auto()
@@ -107,20 +128,6 @@ class VTF_FLAG(Enum):
     CSGO_ASYNC_SKIP_INITIAL_LOW_RES = auto()
     IGNORE_PICMIP = auto()
 
-# Idk what this does, hope it's not important
-#class FLAG_EXTRA(Enum):
-#    USING_PREMULTIPLIED_ALPHA_RESIZE = auto()
-
-#class HDRI_MODE(Enum):
-#    FLAT = auto()
-#    CUBEMAP = auto()
-#    SKYBOX = auto()
-
-#class HOTSPOT_RECT_FLAGS(Enum):
-#    RANDOM_ROTATION = auto()
-#    RANDOM_REFLECTION = auto()
-#    IS_ALTERNATE = auto()
-
 class PLATFORM(Enum):
     PC = auto()
     XBOX = auto()
@@ -151,12 +158,6 @@ class RESIZE_FILTER(Enum):
     KAISER = auto()
     NICE = auto()
 
-#class RESIZE_EDGE(Enum):
-#    CLAMP = auto()
-#    REFLECT = auto()
-#    WRAP = auto()
-#    ZERO = auto()
-
 class RESIZE_METHOD(Enum):
     NONE = auto()
     BIGGER = auto()
@@ -168,116 +169,22 @@ class COMPRESSION_METHOD(Enum):
     ZSTD = auto()
     CONSOLE_LZMA = auto()
 
-
-
-
 #Flags
-class MODE(Enum):
-    CREATE = auto()
-    EDIT = auto()
-    EXTRACT = auto()
-    INFO = auto()
-    CONVERT = auto()  # Alias for CREATE (vtex2 compatibility)
+#class MODE(Enum):
+#    CREATE = auto()
+#    EDIT = auto()
+#    EXTRACT = auto()
+#    INFO = auto()
+#    CONVERT = auto()  # Alias for CREATE
 
 class VERSION(Enum):
-    DEFAULT = "7.4" #Default Version
-    V7_2 = '7.2'
-    V7_4 = "7.4" #Default Version
+    DEFAULT = "7.2" #Default Version
+    V7_2 = "7.2"
+    V7_4 = "7.4"
     V7_5 = "7.5"
     V7_6 = "7.6"
 
 
-@dataclass
-class VTFNormalMapOptions(Enum):
-    INVERT_GREEN: bool = False #Invert Green Channel needs to be set if the normalmap is in OpenGL format, ie Blender
-    BUMPSCALE : float = 1.0 # Range 0.0 to 1.0
-
-
-@dataclass
-class VTFResizeOptions:
-    WIDTH: int = None
-    HEIGHT: int = None
-    #Range 0 to 1
-    quality: float = -1 #Default
-    method: RESIZE_METHOD = RESIZE_METHOD.NEAREST
-
-@dataclass
-class VTFConvertOptions:
-
-    #Required
-    input_path: str | Path
-    output_path: str | Path
-    MODE: MODE = MODE.CONVERT
-
-    #Optional
-    format: IMAGE_FORMAT = IMAGE_FORMAT.DEFAULT
-    vtf_flags: list[VTF_FLAG] = None
-    filter: RESIZE_FILTER = RESIZE_FILTER.DEFAULT
-    resize: VTFResizeOptions = None
-    normal: VTFNormalMapOptions = None
-    compression_level: float = -1 #Range 0 to 1, default -1 for default compression level
-    compression_method: COMPRESSION_METHOD = COMPRESSION_METHOD.ZSTD
-    version: VERSION = VERSION.DEFAULT
-    platform: PLATFORM = PLATFORM.PC
-
-    disable_mips: bool = False
-
-    def __post_init__(self):
-        # Convert input_path and output_path to Path objects if they are strings
-        if isinstance(self.input_path, str):
-            self.input_path = Path(self.input_path)
-        if isinstance(self.output_path, str):
-            self.output_path = Path(self.output_path)
-
-        self.input_path = self.input_path.resolve()
-
-        # Validate that input_path exists
-        if not self.input_path.exists():
-            raise FileNotFoundError(f"Input file not found: {self.input_path}")
-
-        #Create output directory if it doesn't exist
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-
-    def get_cmd(self):
-        if self.MODE == MODE.CONVERT:
-
-
-            cmd = [self.MODE.name.lower()] #Start with the mode as the first argument, e.g. "convert"
-
-            cmd += ['--input', str(self.input_path)]
-            cmd += ['--output', str(self.output_path)] if self.output_path is not None else []
-
-            cmd += ['--format', self.format.name] if self.format != IMAGE_FORMAT.DEFAULT else []
-            cmd += ['--platform', self.platform.name] if self.platform != PLATFORM.PC else []
-
-            if self.vtf_flags is not None:
-                for flag in self.vtf_flags:
-                    cmd += ['--flag', flag.name]
-            
-            if self.resize is not None:
-                cmd += ['--width', str(self.resize.WIDTH)]          if self.resize.WIDTH   is not None              else []
-                cmd += ['--height', str(self.resize.HEIGHT)]        if self.resize.HEIGHT  is not None              else []
-                cmd += ['--quality', str(self.resize.quality)]      if self.resize.quality != -1                    else []
-                cmd += ['--resize-method', self.resize.method.name] if self.resize.method  != RESIZE_METHOD.NEAREST else []
-            
-            if self.normal is not None:
-                cmd += ['--flag', VTF_FLAG.NORMAL.name] if VTF_FLAG.NORMAL not in self.vtf_flags else []
-                cmd += ['--invert-green'] if self.normal.INVERT_GREEN else []
-                cmd += ['--bumpscale', str(self.normal.BUMPSCALE)] if self.normal.BUMPSCALE != 1.0 else []
-            
-            cmd += ['--compression-level', str(self.compression_level)] if self.compression_level != -1 else []
-            cmd += ['--compression-method', self.compression_method.name] if self.compression_method != COMPRESSION_METHOD.ZSTD else []
-            cmd += ['--version', self.version.value] if self.version != VERSION.DEFAULT else []
-
-            cmd += ['disable_mips'] if self.disable_mips else []
-            cmd += ['--filter', self.filter.name] if self.filter != RESIZE_FILTER.DEFAULT else []
-
-
-
-            return cmd
-        else:
-            raise NotImplementedError(f"Mode {self.MODE} not implemented yet")
 
 
 
