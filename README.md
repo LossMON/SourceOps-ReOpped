@@ -67,15 +67,20 @@ This remake integrates and utilizes the following third-party tools:
 1.  **Game Setup:** Add your game folder (containing `gameinfo.txt`) in the **Games** panel.
 2.  **Asset Setup:** Use **"Add Collections"** in the **Models** panel to batch-populate the export list.
 3.  **VMT Overrides:** Use the **"Preview / Edit VMT"** button to open the shader code in Blender's Text Editor for custom overrides.
-4.  **Export:** Click the **Auto Export** icon (Magic Wand/Car icon) to run the full pipeline.
+4.  **Export:** Click the **Auto Export** icon (the icon with the car/wand) to run the full pipeline.
     *   **Pro Tip:** **Hold CTRL + Left Click** on the Export icon to open a dialog with advanced options, allowing you to toggle specific export steps.
 
 ---
 
-## **Credits**
+## **Credits & Special Thanks**
 
 **SourceOps ReOpped** is maintained by **LESSMAN**.
 
+### **Linux Integration Shoutout**
+Massive thanks to **Glad-BR** for the specialized work making **MareTF** work natively on Linux in this version:
+https://github.com/Glad-BR
+
+### **Project History**
 This project is a technical remake of the original SourceOps by **bonjorno7** and the community:
 https://github.com/bonjorno7/SourceOps
 
@@ -86,6 +91,7 @@ bonjorno7, CabbageMcGravel, GorangeNinja, JonasAlmaas, KrystianoXPL, Peak-CDE, R
 
 ## **Support**
 
-To support the original development of the SourceOps base, visit:
-[Gumroad](https://bonjorno7.gumroad.com) or [Blender Market](https://blendermarket.com/creators/bonjorno7).
-[PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=43R2CKWLJZ78S).
+support the original Creator of SourceOps, visit:
+*   **Gumroad:** https://bonjorno7.gumroad.com
+*   **Blender Market:** https://blendermarket.com/creators/bonjorno7
+*   **PayPal:** https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=43R2CKWLJZ78S
