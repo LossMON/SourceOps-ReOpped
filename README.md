@@ -11,7 +11,6 @@
 
 ## **Video Tutorial**
 [![Watch the tutorial](https://www.youtube.com/watch?v=RWKZuFzWLZE)
-*Click the image above to watch the full guide on how to set up and use SourceOps ReOpped.*
 
 ---
 
