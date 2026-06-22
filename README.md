@@ -72,7 +72,7 @@ This addon wouldn't work without these great projects:
 
 ## **Special Thanks**
 
-A huge shoutout to **Glad-BR** for the massive help with the Linux integration. They did the heavy lifting to make **MareTF** work natively on Linux for this version.
+A huge shoutout to **Glad-BR** for the massive help with the Linux integration for **MareTF** to work on Linux alongside SourceOps ReOpped
 Check them out: https://github.com/Glad-BR
 
 ---
