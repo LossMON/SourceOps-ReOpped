@@ -473,9 +473,9 @@ class Model:
         objects = set()
         if self.reference: 
             objects.update(self.get_all_objects(self.reference))
-        for lod_col in [self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, self.lod_4_collection, self.lod_5_collection, self.lod_6_collection]:
-            if lod_col: 
-                objects.update(self.get_all_objects(lod_col))
+            
+        # WE EXPLICITLY DO NOT ADD LOD COLLECTIONS HERE SO THEIR MATERIALS ARE NEVER EXPORTED!
+        
         if self.bodygroups:
             for bg in self.bodygroups.children:
                 for col in bg.children: 
