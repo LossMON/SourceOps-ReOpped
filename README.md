@@ -28,7 +28,7 @@
 ### **3. LOD & QC Automation**
 *   **6-Level LOD System:** A full UI to manage **LOD 1 through LOD 6** collections and distances.
 *   **No more manual QC editing:** ReOpped writes your `$cdmaterials`, `$modelname`, `$lod` blocks, and bodygroup syntax for you.
-*   **( MAKE SURE YOUR LOD MESH HAS THE SAME MATERIALS AS THE ORIGINAL MODEL MESH AND MAKE SURE THEIR MATERIALS DONT END UP WITH DOTS AND NUMBERS AT THE END SUCH AS WoodFrame.003 and etc)
+*   ( MAKE SURE YOUR LOD MESH HAS THE SAME MATERIALS AS THE ORIGINAL MODEL MESH AND MAKE SURE THEIR MATERIALS DONT END UP WITH DOTS AND NUMBERS AT THE END SUCH AS WoodFrame.003 and etc)
 
 ### **4. Better Tooling**
 *   **Multi-Model Batch Compilation:** You can now compile multiple models at once. The UI features a selection list where you can **check-mark the boxes** for specific models and process them all in a single batch.
