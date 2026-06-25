@@ -36,26 +36,44 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
         if existing_text:
             controlled_keys = ["$basetexture", "$bumpmap", "$surfaceprop", "$model", "$translucent", "$alphatest", "$nocull", "$envmap", "$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"]
             
+            brace_level = 0
+            first_brace_seen = False
+
             for line in existing_text.lines:
                 raw_line = line.body
                 stripped = raw_line.strip()
                 
-                if stripped == "{" or stripped == "}": 
-                    continue
-                    
-                clean_shader = stripped.replace('"', '').lower()
-                if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
-                    continue
+                if not first_brace_seen:
+                    clean_shader = stripped.replace('"', '').lower()
+                    if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
+                        continue
+                    if clean_shader in [
+                        "vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {",
+                        "vertexlitgeneric{", "unlitgeneric{", "lightmappedgeneric{"
+                    ]:
+                        first_brace_seen = True
+                        continue
+                    if stripped == "{":
+                        first_brace_seen = True
+                        continue
+                else:
+                    if stripped == "{":
+                        brace_level += 1
+                    elif stripped == "}":
+                        if brace_level == 0:
+                            continue
+                        brace_level -= 1
                         
                 is_controlled = False
-                if stripped:
+                if stripped and stripped != "{" and stripped != "}":
                     # Get the first word (the VMT parameter key) and lower it
                     first_word = stripped.replace('"', '').split()[0].lower()
-                    if first_word in controlled_keys:
-                        # User edited a UI-controlled line. Save their exact text!
-                        user_overrides[first_word] = raw_line.rstrip('\n')
-                        is_controlled = True
-                        
+                    if brace_level == 0:
+                        if first_word in controlled_keys:
+                            # User edited a UI-controlled line. Save their exact text!
+                            user_overrides[first_word] = raw_line.rstrip('\n')
+                            is_controlled = True
+                            
                 if not is_controlled:
                     custom_lines.append(raw_line.rstrip('\n'))
                     

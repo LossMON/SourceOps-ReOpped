@@ -544,23 +544,42 @@ class Model:
                             except: 
                                 pass
                             
+                        brace_level = 0
+                        first_brace_seen = False
+
                         for raw_line in lines_to_parse:
                             stripped = raw_line.strip()
-                            if stripped == "{" or stripped == "}": 
-                                continue
                             
-                            clean_shader = stripped.replace('"', '').lower()
-                            if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
-                                continue
+                            if not first_brace_seen:
+                                clean_shader = stripped.replace('"', '').lower()
+                                if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
+                                    continue
+                                if clean_shader in [
+                                    "vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {",
+                                    "vertexlitgeneric{", "unlitgeneric{", "lightmappedgeneric{"
+                                ]:
+                                    first_brace_seen = True
+                                    continue
+                                if stripped == "{":
+                                    first_brace_seen = True
+                                    continue
+                            else:
+                                if stripped == "{":
+                                    brace_level += 1
+                                elif stripped == "}":
+                                    if brace_level == 0:
+                                        continue
+                                    brace_level -= 1
                                     
                             is_controlled = False
-                            if stripped:
+                            if stripped and stripped != "{" and stripped != "}":
                                 first_word = stripped.replace('"', '').split()[0].lower()
-                                if first_word in ui_keys:
-                                    is_controlled = True
-                                elif first_word in hardcoded_keys: 
-                                    user_overrides[first_word] = raw_line.rstrip('\n')
-                                    is_controlled = True
+                                if brace_level == 0:
+                                    if first_word in ui_keys:
+                                        is_controlled = True
+                                    elif first_word in hardcoded_keys: 
+                                        user_overrides[first_word] = raw_line.rstrip('\n')
+                                        is_controlled = True
                                     
                             if not is_controlled:
                                 custom_lines.append(raw_line.rstrip('\n'))
