@@ -38,7 +38,9 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
             "translucent": vmt_trans,
             "alphatest": vmt_alpha,
             "nocull": getattr(config, "vmt_nocull", False),
-            "envmap": getattr(config, "vmt_envmap", False)
+            "envmap": getattr(config, "vmt_envmap", False),
+            "basetexture": basetexture_path,
+            "surfaceprop": model.surface
         }
         
         groups = {
@@ -105,16 +107,22 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
             while custom_lines and not custom_lines[0].strip(): custom_lines.pop(0)
             while custom_lines and not custom_lines[-1].strip(): custom_lines.pop()
 
-        # Track UI changes invisibly inside Blender's metadata (NO comments in the text)
+        # Track UI changes invisibly inside Blender's metadata
         previous_state = {}
         if existing_text and "sourceops_state" in existing_text:
             state_str = existing_text["sourceops_state"]
-            for pair in state_str.split(","):
+            delim = "|" if "|" in state_str else ","
+            for pair in state_str.split(delim):
                 if ":" in pair:
-                    k, v = pair.split(":")
-                    previous_state[k] = (v == "1")
+                    k, v = pair.split(":", 1)
+                    if v in ["1", "0"]:
+                        previous_state[k] = (v == "1")
+                    else:
+                        previous_state[k] = v
 
         vmt_lines = [f'"{shader}"', '{']
+        
+        basetexture_changed = (previous_state.get("basetexture") != current_state.get("basetexture"))
         
         for grp_name, grp_items in groups.items():
             is_toggled_group = grp_name in current_state
@@ -128,8 +136,12 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                     changed = True
                     turned_on = curr_val
                     
+                if grp_name in ["bumpmap", "envmap"] and basetexture_changed:
+                    changed = True
+                    turned_on = curr_val
+                    
             if changed:
-                if turned_on:
+                if (isinstance(turned_on, bool) and turned_on) or isinstance(turned_on, str):
                     for k, default_str in grp_items:
                         vmt_lines.append(default_str)
             else:
@@ -165,7 +177,13 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
         existing_text.clear()
         existing_text.write(vmt_content)
         
-        state_str = ",".join([f"{k}:{'1' if v else '0'}" for k, v in current_state.items()])
+        state_parts = []
+        for k, v in current_state.items():
+            if isinstance(v, bool):
+                state_parts.append(f"{k}:{'1' if v else '0'}")
+            else:
+                state_parts.append(f"{k}:{v}")
+        state_str = "|".join(state_parts)
         existing_text["sourceops_state"] = state_str
         
         existing_text.cursor_set(0, character=0)
@@ -234,8 +252,22 @@ class SOURCEOPS_OT_ResetVMT(bpy.types.Operator):
             ]
             existing_text.write("\n".join(vmt_lines) + "\n")
             
-            current_state = {"bumpmap": False, "translucent": False, "alphatest": False, "nocull": False, "envmap": False}
-            state_str = ",".join([f"{k}:{'1' if v else '0'}" for k, v in current_state.items()])
+            current_state = {
+                "bumpmap": False, 
+                "translucent": False, 
+                "alphatest": False, 
+                "nocull": False, 
+                "envmap": False,
+                "basetexture": basetexture_path,
+                "surfaceprop": model.surface
+            }
+            state_parts = []
+            for k, v in current_state.items():
+                if isinstance(v, bool):
+                    state_parts.append(f"{k}:{'1' if v else '0'}")
+                else:
+                    state_parts.append(f"{k}:{v}")
+            state_str = "|".join(state_parts)
             existing_text["sourceops_state"] = state_str
 
         self.report({'INFO'}, f"Reset VMT checkboxes and text editor for {mat_clean}!")

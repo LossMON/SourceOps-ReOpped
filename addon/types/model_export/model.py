@@ -535,15 +535,17 @@ class Model:
                             vmt_trans = True
                             vmt_alpha = False
                             
+                        basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
+                        
                         current_state = {
                             "bumpmap": generate_normal,
                             "translucent": vmt_trans,
                             "alphatest": vmt_alpha,
                             "nocull": getattr(config, "vmt_nocull", False),
-                            "envmap": getattr(config, "vmt_envmap", False)
+                            "envmap": getattr(config, "vmt_envmap", False),
+                            "basetexture": basetexture_path,
+                            "surfaceprop": self.surface
                         }
-                        
-                        basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
                         
                         groups = {
                             "basetexture": [("$basetexture", f'    "$basetexture" "{basetexture_path}"')],
@@ -619,13 +621,19 @@ class Model:
                         previous_state = {}
                         if existing_text and "sourceops_state" in existing_text:
                             state_str = existing_text["sourceops_state"]
-                            for pair in state_str.split(","):
+                            delim = "|" if "|" in state_str else ","
+                            for pair in state_str.split(delim):
                                 if ":" in pair:
-                                    k, v = pair.split(":")
-                                    previous_state[k] = (v == "1")
+                                    k, v = pair.split(":", 1)
+                                    if v in ["1", "0"]:
+                                        previous_state[k] = (v == "1")
+                                    else:
+                                        previous_state[k] = v
 
                         vmt_lines = [f'"{shader}"', '{']
                         
+                        basetexture_changed = (previous_state.get("basetexture") != current_state.get("basetexture"))
+
                         for grp_name, grp_items in groups.items():
                             is_toggled_group = grp_name in current_state
                             changed = False
@@ -638,8 +646,12 @@ class Model:
                                     changed = True
                                     turned_on = curr_val
                                     
+                                if grp_name in ["bumpmap", "envmap"] and basetexture_changed:
+                                    changed = True
+                                    turned_on = curr_val
+                                    
                             if changed:
-                                if turned_on:
+                                if (isinstance(turned_on, bool) and turned_on) or isinstance(turned_on, str):
                                     for k, default_str in grp_items:
                                         vmt_lines.append(default_str)
                             else:
@@ -671,7 +683,14 @@ class Model:
                         
                         if not existing_text:
                             existing_text = bpy.data.texts.new(text_name)
-                        state_str = ",".join([f"{k}:{'1' if v else '0'}" for k, v in current_state.items()])
+                            
+                        state_parts = []
+                        for k, v in current_state.items():
+                            if isinstance(v, bool):
+                                state_parts.append(f"{k}:{'1' if v else '0'}")
+                            else:
+                                state_parts.append(f"{k}:{v}")
+                        state_str = "|".join(state_parts)
                         existing_text["sourceops_state"] = state_str
                         
                         try:
