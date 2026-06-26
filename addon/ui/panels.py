@@ -531,10 +531,12 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
         
         box.separator()
         box.label(text='Custom VMT Editor:', icon='TEXT')
-        row = box.row()
+        row = box.row(align=True)
         row.scale_y = 1.2
         op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT', icon='TEXT')
         op.item_type = item_type
+        op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
+        op2.item_type = item_type
 
     def draw_list_buttons(self, layout, item):
         op = layout.operator('sourceops.list_operator', text='', icon='ADD')

@@ -523,97 +523,11 @@ class Model:
                     vmt_needs_update = self.overwrite_vmt or not vmt_path.is_file()
                     
                     if vmt_needs_update:
-                        
-                        # --- SMART MERGER: Extract User's Custom Lines & Edits ---
                         text_name = f"VMT_{mat_clean}.vmt"
-                        custom_text = bpy.data.texts.get(text_name)
-                        custom_lines = []
-                        user_overrides = {}
+                        existing_text = bpy.data.texts.get(text_name)
                         
-                        ui_keys = ["$basetexture", "$bumpmap", "$surfaceprop", "$model", "$translucent", "$alphatest", "$nocull", "$envmap"]
-                        hardcoded_keys = ["$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"]
-                        
-                        # First try Blender Text Editor, then fall back to physical VMT file
-                        lines_to_parse = []
-                        if custom_text:
-                            lines_to_parse = [line.body for line in custom_text.lines]
-                        elif vmt_path.is_file():
-                            try:
-                                with open(vmt_path, 'r') as f: 
-                                    lines_to_parse = f.readlines()
-                            except: 
-                                pass
-                            
-                        brace_level = 0
-                        first_brace_seen = False
-
-                        for raw_line in lines_to_parse:
-                            stripped = raw_line.strip()
-                            
-                            if not first_brace_seen:
-                                clean_shader = stripped.replace('"', '').lower()
-                                if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
-                                    continue
-                                if clean_shader in [
-                                    "vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {",
-                                    "vertexlitgeneric{", "unlitgeneric{", "lightmappedgeneric{"
-                                ]:
-                                    first_brace_seen = True
-                                    continue
-                                if stripped == "{":
-                                    first_brace_seen = True
-                                    continue
-                            else:
-                                if stripped == "{":
-                                    brace_level += 1
-                                elif stripped == "}":
-                                    if brace_level == 0:
-                                        continue
-                                    brace_level -= 1
-                                    
-                            is_controlled = False
-                            if stripped and stripped != "{" and stripped != "}":
-                                first_word = stripped.replace('"', '').split()[0].lower()
-                                if brace_level == 0:
-                                    if first_word in ui_keys:
-                                        is_controlled = True
-                                    elif first_word in hardcoded_keys: 
-                                        user_overrides[first_word] = raw_line.rstrip('\n')
-                                        is_controlled = True
-                                    
-                            if not is_controlled:
-                                custom_lines.append(raw_line.rstrip('\n'))
-                                
-                        while custom_lines and not custom_lines[0].strip(): 
-                            custom_lines.pop(0)
-                        while custom_lines and not custom_lines[-1].strip(): 
-                            custom_lines.pop()
-
-                        def get_line(key, default_str):
-                            if key in user_overrides:
-                                val = user_overrides[key]
-                                if not val.startswith(' ') and not val.startswith('\t'):
-                                    return f'    {val}'
-                                return val
-                            return default_str
-
-                        # --- GENERATE VMT FROM UI ---
                         shader = getattr(config, "vmt_shader", "VertexLitGeneric")
                         generate_normal = getattr(config, "vtf_normal_map", False)
-                        basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
-
-                        vmt_lines = [
-                            f'"{shader}"',
-                            '{',
-                            get_line("$basetexture", f'    "$basetexture" "{basetexture_path}"'),
-                        ]
-                        
-                        if generate_normal: 
-                            vmt_lines.append(get_line("$bumpmap", f'    "$bumpmap" "{basetexture_path}_normalmap"'))
-                        
-                        vmt_lines.append(get_line("$surfaceprop", f'    "$surfaceprop" "{self.surface}"'))
-                        vmt_lines.append(get_line("$model", '    "$model" 1'))
-                        
                         vmt_trans = getattr(config, "vmt_translucent", False)
                         vmt_alpha = getattr(config, "vmt_alphatest", False)
                         
@@ -621,25 +535,126 @@ class Model:
                             vmt_trans = True
                             vmt_alpha = False
                             
-                        if vmt_trans: 
-                            vmt_lines.append(get_line("$translucent", '    "$translucent" 1'))
-                        if vmt_alpha: 
-                            vmt_lines.append(get_line("$alphatest", '    "$alphatest" 1'))
-                            
-                        if getattr(config, "vmt_nocull", False): 
-                            vmt_lines.append(get_line("$nocull", '    "$nocull" 1'))
+                        current_state = {
+                            "bumpmap": generate_normal,
+                            "translucent": vmt_trans,
+                            "alphatest": vmt_alpha,
+                            "nocull": getattr(config, "vmt_nocull", False),
+                            "envmap": getattr(config, "vmt_envmap", False)
+                        }
                         
-                        if getattr(config, "vmt_envmap", False):
-                            if generate_normal: 
-                                vmt_lines.append(get_line("$envmap", f'    "$envmap" "{basetexture_path}_normalmap"'))
-                            else: 
-                                vmt_lines.append(get_line("$envmap", '    "$envmap" "env_cubemap"'))
-                            vmt_lines.append(get_line("$normalmapalphaenvmapmask", '    "$normalmapalphaenvmapmask" 1'))
-                            vmt_lines.append(get_line("$envmaptint", '    "$envmaptint" "[.3 .3 .3]"'))
-                            vmt_lines.append(get_line("$reflectivity", '    "$reflectivity" "[1 1 1]"'))
-                            vmt_lines.append(get_line("$envmapblur", '    "$envmapblur" "1"'))
+                        basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
+                        
+                        groups = {
+                            "basetexture": [("$basetexture", f'    "$basetexture" "{basetexture_path}"')],
+                            "bumpmap": [("$bumpmap", f'    "$bumpmap" "{basetexture_path}_normalmap"')],
+                            "surfaceprop": [("$surfaceprop", f'    "$surfaceprop" "{self.surface}"')],
+                            "model": [("$model", '    "$model" 1')],
+                            "translucent": [("$translucent", '    "$translucent" 1')],
+                            "alphatest": [("$alphatest", '    "$alphatest" 1')],
+                            "nocull": [("$nocull", '    "$nocull" 1')],
+                            "envmap": [
+                                ("$envmap", f'    "$envmap" "{basetexture_path}_normalmap"' if generate_normal else '    "$envmap" "env_cubemap"'),
+                                ("$normalmapalphaenvmapmask", '    "$normalmapalphaenvmapmask" 1'),
+                                ("$envmaptint", '    "$envmaptint" "[.3 .3 .3]"'),
+                                ("$reflectivity", '    "$reflectivity" "[1 1 1]"'),
+                                ("$envmapblur", '    "$envmapblur" "1"')
+                            ]
+                        }
+                        
+                        controlled_keys = [k for grp in groups.values() for k, d in grp]
+                        custom_lines = []
+                        user_overrides = {}
+                        
+                        lines_to_parse = []
+                        if existing_text and len(existing_text.lines) > 0:
+                            lines_to_parse = [line.body for line in existing_text.lines]
+                        elif vmt_path.is_file():
+                            try:
+                                with open(vmt_path, 'r') as f: 
+                                    lines_to_parse = f.read().splitlines()
+                            except: 
+                                pass
+
+                        if lines_to_parse:
+                            brace_level = 0
+                            first_brace_seen = False
+                            for raw_line in lines_to_parse:
+                                stripped = raw_line.strip()
+                                
+                                if stripped.startswith("// [SourceOps_State]"):
+                                    continue
+                                    
+                                if not first_brace_seen:
+                                    clean_shader = stripped.replace('"', '').lower()
+                                    if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
+                                        continue
+                                    if clean_shader in ["vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {", "vertexlitgeneric{", "unlitgeneric{", "lightmappedgeneric{"]:
+                                        first_brace_seen = True
+                                        continue
+                                    if stripped == "{":
+                                        first_brace_seen = True
+                                        continue
+                                else:
+                                    if stripped == "{":
+                                        brace_level += 1
+                                    elif stripped == "}":
+                                        if brace_level == 0:
+                                            continue
+                                        brace_level -= 1
+                                        
+                                is_controlled = False
+                                if stripped and stripped != "{" and stripped != "}" and brace_level == 0:
+                                    first_word = stripped.replace('"', '').split()[0].lower()
+                                    if first_word in controlled_keys:
+                                        user_overrides[first_word] = raw_line.rstrip('\n')
+                                        is_controlled = True
+                                        
+                                if not is_controlled:
+                                    custom_lines.append(raw_line.rstrip('\n'))
+                                    
+                            while custom_lines and not custom_lines[0].strip(): custom_lines.pop(0)
+                            while custom_lines and not custom_lines[-1].strip(): custom_lines.pop()
+
+                        previous_state = {}
+                        if existing_text and "sourceops_state" in existing_text:
+                            state_str = existing_text["sourceops_state"]
+                            for pair in state_str.split(","):
+                                if ":" in pair:
+                                    k, v = pair.split(":")
+                                    previous_state[k] = (v == "1")
+
+                        vmt_lines = [f'"{shader}"', '{']
+                        
+                        for grp_name, grp_items in groups.items():
+                            is_toggled_group = grp_name in current_state
+                            changed = False
+                            turned_on = False
                             
-                        # Inject the preserved custom lines
+                            if is_toggled_group:
+                                prev_val = previous_state.get(grp_name, None)
+                                curr_val = current_state[grp_name]
+                                if prev_val is not None and prev_val != curr_val:
+                                    changed = True
+                                    turned_on = curr_val
+                                    
+                            if changed:
+                                if turned_on:
+                                    for k, default_str in grp_items:
+                                        vmt_lines.append(default_str)
+                            else:
+                                for k, default_str in grp_items:
+                                    if k in user_overrides:
+                                        val = user_overrides[k]
+                                        if not val.startswith(' ') and not val.startswith('\t'):
+                                            vmt_lines.append(f'    {val}')
+                                        else:
+                                            vmt_lines.append(val)
+                                    else:
+                                        if not previous_state:
+                                            if (is_toggled_group and current_state[grp_name]) or (not is_toggled_group):
+                                                vmt_lines.append(default_str)
+
                         if custom_lines:
                             vmt_lines.append('')
                             for cl in custom_lines:
@@ -650,9 +665,14 @@ class Model:
                                         vmt_lines.append(cl)
                                 else:
                                     vmt_lines.append('')
-                                
-                        vmt_lines.append('}\n')
-                        vmt_content = "\n".join(vmt_lines)
+                                    
+                        vmt_lines.append('}')
+                        vmt_content = "\n".join(vmt_lines) + "\n"
+                        
+                        if not existing_text:
+                            existing_text = bpy.data.texts.new(text_name)
+                        state_str = ",".join([f"{k}:{'1' if v else '0'}" for k, v in current_state.items()])
+                        existing_text["sourceops_state"] = state_str
                         
                         try:
                             with open(vmt_path, 'w') as f: 

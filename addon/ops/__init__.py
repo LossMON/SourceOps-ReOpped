@@ -36,6 +36,7 @@ classes = (
     backup.SOURCEOPS_OT_BackupPreferences,
     backup.SOURCEOPS_OT_RestorePreferences,
     preview_vmt.SOURCEOPS_OT_PreviewVMT,
+    preview_vmt.SOURCEOPS_OT_ResetVMT,
     spawn_info_player.SOURCEOPS_OT_SpawnInfoPlayer,
 )
 
