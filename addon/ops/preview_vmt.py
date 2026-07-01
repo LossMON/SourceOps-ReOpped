@@ -1,4 +1,6 @@
 import bpy
+import re
+from pathlib import Path
 from .. utils import common
 
 class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
@@ -10,6 +12,8 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
     item_type: bpy.props.StringProperty()
 
     def execute(self, context):
+        prefs = common.get_prefs(context)
+        game = common.get_game(prefs)
         sourceops = common.get_globals(context)
         model = common.get_model(sourceops)
         
@@ -24,6 +28,32 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
             
         mat_subfolder = model.material_folder_items[0].name.replace('\\', '/').strip('/') if len(model.material_folder_items) > 0 else ''
         basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
+        surface_prop = model.surface if hasattr(model, 'surface') else 'default'
+        
+        # Resolve target directory to read VMT from disk if missing
+        addon_name = common.clean_filename(Path(model.name).stem)
+        create_material_folder = getattr(sourceops, 'auto_create_material_folder', True)
+        use_addon_folder = getattr(sourceops, 'auto_use_addon_folder', True)
+        
+        if game and getattr(game, 'models', ''):
+            models_path = Path(game.models)
+            if create_material_folder:
+                if use_addon_folder:
+                    target_dir = models_path.joinpath(addon_name, 'materials', mat_subfolder)
+                else:
+                    if models_path.name.lower() == 'models':
+                        target_dir = models_path.parent.joinpath('materials', mat_subfolder)
+                    else:
+                        target_dir = models_path.joinpath('materials', mat_subfolder)
+            else:
+                if use_addon_folder:
+                    target_dir = models_path.joinpath(addon_name, 'models', mat_subfolder)
+                else:
+                    target_dir = models_path.joinpath(mat_subfolder)
+                    
+            vmt_path = target_dir.joinpath(f"{mat_clean}.vmt")
+        else:
+            vmt_path = Path(f"{mat_clean}.vmt")
         
         text_name = f"VMT_{mat_clean}.vmt"
         existing_text = bpy.data.texts.get(text_name)
@@ -34,156 +64,139 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
         vmt_alpha = getattr(config, "vmt_alphatest", False)
         
         current_state = {
-            "bumpmap": generate_normal,
-            "translucent": vmt_trans,
-            "alphatest": vmt_alpha,
-            "nocull": getattr(config, "vmt_nocull", False),
-            "envmap": getattr(config, "vmt_envmap", False),
             "basetexture": basetexture_path,
-            "surfaceprop": model.surface
+            "bumpmap": "1" if generate_normal else "0",
+            "surfaceprop": surface_prop,
+            "translucent": "1" if vmt_trans else "0",
+            "alphatest": "1" if vmt_alpha else "0",
+            "nocull": "1" if getattr(config, "vmt_nocull", False) else "0",
+            "envmap": "1" if getattr(config, "vmt_envmap", False) else "0"
         }
         
-        groups = {
-            "basetexture": [("$basetexture", f'    "$basetexture" "{basetexture_path}"')],
-            "bumpmap": [("$bumpmap", f'    "$bumpmap" "{basetexture_path}_normalmap"')],
-            "surfaceprop": [("$surfaceprop", f'    "$surfaceprop" "{model.surface}"')],
-            "model": [("$model", '    "$model" 1')],
-            "translucent": [("$translucent", '    "$translucent" 1')],
-            "alphatest": [("$alphatest", '    "$alphatest" 1')],
-            "nocull": [("$nocull", '    "$nocull" 1')],
-            "envmap": [
-                ("$envmap", f'    "$envmap" "{basetexture_path}_normalmap"' if generate_normal else '    "$envmap" "env_cubemap"'),
-                ("$normalmapalphaenvmapmask", '    "$normalmapalphaenvmapmask" 1'),
-                ("$envmaptint", '    "$envmaptint" "[.3 .3 .3]"'),
-                ("$reflectivity", '    "$reflectivity" "[1 1 1]"'),
-                ("$envmapblur", '    "$envmapblur" "1"')
-            ]
-        }
+        lines_to_parse = []
+        previous_state = {}
         
-        controlled_keys = [k for grp in groups.values() for k, d in grp]
-        
-        custom_lines = []
-        user_overrides = {}
-        
-        # Gather what the user wrote in the Text Editor
+        # Read from Text Editor OR Disk
         if existing_text and len(existing_text.lines) > 0:
-            brace_level = 0
-            first_brace_seen = False
-            for line in existing_text.lines:
-                raw_line = line.body
-                stripped = raw_line.strip()
+            lines_to_parse = [line.body for line in existing_text.lines]
+            state_str = existing_text.get("sourceops_state", "")
+            for pair in state_str.split("|"):
+                if ":" in pair:
+                    k, v = pair.split(":", 1)
+                    previous_state[k] = v
+        elif vmt_path.is_file():
+            try:
+                with open(vmt_path, 'r') as f:
+                    lines_to_parse = f.read().splitlines()
+            except:
+                pass
                 
-                if stripped.startswith("// [SourceOps_State]"):
-                    continue
+        # Extract the saved state comment from the disk file to preserve cross-session edits
+        for line in reversed(lines_to_parse):
+            if line.strip().startswith("// [SourceOps_State]"):
+                state_str_old = line.split("// [SourceOps_State]")[1].strip()
+                for pair in state_str_old.split("|"):
+                    if ":" in pair:
+                        k, v = pair.split(":", 1)
+                        previous_state[k] = v
+                break
+                
+        # Strip the state comments so they are hidden from the text editor completely
+        lines_to_parse = [l for l in lines_to_parse if not l.strip().startswith("// [SourceOps_State]")]
+        
+        controlled_keys = {
+            "$basetexture", "$bumpmap", "$surfaceprop", "$model",
+            "$translucent", "$alphatest", "$nocull", "$envmap",
+            "$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"
+        }
+        
+        user_overrides = {}
+        custom_lines = []
+        
+        if lines_to_parse:
+            for raw_line in lines_to_parse:
+                stripped = raw_line.strip()
+                if not stripped: continue
+                
+                # Use bulletproof string matching instead of checking { brackets which breaks parsing
+                lower_line = stripped.lower().replace('"', '')
+                if lower_line in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: continue
+                if lower_line in ["vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {"]: continue
+                if stripped == "{" or stripped == "}": continue
                     
-                if not first_brace_seen:
-                    clean_shader = stripped.replace('"', '').lower()
-                    if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
-                        continue
-                    if clean_shader in ["vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {", "vertexlitgeneric{", "unlitgeneric{", "lightmappedgeneric{"]:
-                        first_brace_seen = True
-                        continue
-                    if stripped == "{":
-                        first_brace_seen = True
-                        continue
-                else:
-                    if stripped == "{":
-                        brace_level += 1
-                    elif stripped == "}":
-                        if brace_level == 0:
-                            continue
-                        brace_level -= 1
-                        
                 is_controlled = False
-                if stripped and stripped != "{" and stripped != "}" and brace_level == 0:
-                    first_word = stripped.replace('"', '').split()[0].lower()
-                    if first_word in controlled_keys:
-                        user_overrides[first_word] = raw_line.rstrip('\n')
+                for c_key in controlled_keys:
+                    if stripped.lower().startswith(c_key) or stripped.lower().startswith(f'"{c_key}"'):
+                        user_overrides[c_key] = raw_line.rstrip('\n')
                         is_controlled = True
+                        break
                         
                 if not is_controlled:
                     custom_lines.append(raw_line.rstrip('\n'))
-                    
-            while custom_lines and not custom_lines[0].strip(): custom_lines.pop(0)
-            while custom_lines and not custom_lines[-1].strip(): custom_lines.pop()
-
-        # Track UI changes invisibly inside Blender's metadata
-        previous_state = {}
-        if existing_text and "sourceops_state" in existing_text:
-            state_str = existing_text["sourceops_state"]
-            delim = "|" if "|" in state_str else ","
-            for pair in state_str.split(delim):
-                if ":" in pair:
-                    k, v = pair.split(":", 1)
-                    if v in ["1", "0"]:
-                        previous_state[k] = (v == "1")
-                    else:
-                        previous_state[k] = v
 
         vmt_lines = [f'"{shader}"', '{']
+        is_first_gen = not previous_state
         
-        basetexture_changed = (previous_state.get("basetexture") != current_state.get("basetexture"))
-        
-        for grp_name, grp_items in groups.items():
-            is_toggled_group = grp_name in current_state
-            changed = False
-            turned_on = False
+        def process_key(key, ui_value, default_str):
+            prop_name = key[1:] # e.g. "$basetexture" -> "basetexture"
             
-            if is_toggled_group:
-                prev_val = previous_state.get(grp_name, None)
-                curr_val = current_state[grp_name]
-                if prev_val is not None and prev_val != curr_val:
-                    changed = True
-                    turned_on = curr_val
-                    
-                if grp_name in ["bumpmap", "envmap"] and basetexture_changed:
-                    changed = True
-                    turned_on = curr_val
-                    
-            if changed:
-                if (isinstance(turned_on, bool) and turned_on) or isinstance(turned_on, str):
-                    for k, default_str in grp_items:
-                        vmt_lines.append(default_str)
+            # Check if the UI actively changed since last save, or if it's the very first generation
+            ui_changed = is_first_gen or (current_state.get(prop_name) != previous_state.get(prop_name))
+            
+            if ui_changed:
+                if ui_value:
+                    vmt_lines.append(default_str)
             else:
-                for k, default_str in grp_items:
-                    if k in user_overrides:
-                        val = user_overrides[k]
-                        if not val.startswith(' ') and not val.startswith('\t'):
-                            vmt_lines.append(f'    {val}')
-                        else:
-                            vmt_lines.append(val)
-                    else:
-                        if not previous_state:
-                            if (is_toggled_group and current_state[grp_name]) or (not is_toggled_group):
-                                vmt_lines.append(default_str)
+                # The UI didn't change! We trust the user's manual edits.
+                # If it's in user_overrides, append it. If they deleted it, we append nothing!
+                if key in user_overrides:
+                    vmt_lines.append(user_overrides[key])
+
+        # Core properties guaranteed to force if UI changed
+        process_key("$basetexture", True, f'    "$basetexture" "{basetexture_path}"')
+        process_key("$surfaceprop", True, f'    "$surfaceprop" "{surface_prop}"')
+        process_key("$model", True, '    "$model" 1')
+        
+        # Toggle properties
+        process_key("$bumpmap", current_state["bumpmap"] == "1", f'    "$bumpmap" "{basetexture_path}_normalmap"')
+        process_key("$translucent", current_state["translucent"] == "1", '    "$translucent" 1')
+        process_key("$alphatest", current_state["alphatest"] == "1", '    "$alphatest" 1')
+        process_key("$nocull", current_state["nocull"] == "1", '    "$nocull" 1')
+        
+        # Environment Map Block
+        ui_changed_envmap = is_first_gen or (current_state.get("envmap") != previous_state.get("envmap"))
+        if ui_changed_envmap:
+            if current_state["envmap"] == "1":
+                vmt_lines.append('    "$envmap" "env_cubemap"')
+                if current_state["bumpmap"] == "1":
+                    vmt_lines.append('    "$normalmapalphaenvmapmask" 1')
+                vmt_lines.append('    "$envmaptint" "[.3 .3 .3]"')
+                vmt_lines.append('    "$reflectivity" "[1 1 1]"')
+                vmt_lines.append('    "$envmapblur" "1"')
+        else:
+            for k in ["$envmap", "$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"]:
+                if k in user_overrides:
+                    vmt_lines.append(user_overrides[k])
 
         if custom_lines:
             vmt_lines.append('')
             for cl in custom_lines:
-                if cl.strip():
-                    if not cl.startswith(' ') and not cl.startswith('\t'): 
-                        vmt_lines.append(f'    {cl}')
-                    else: 
-                        vmt_lines.append(cl)
-                else:
-                    vmt_lines.append('')
+                vmt_lines.append(cl) # Keep exactly as user formatted
                     
         vmt_lines.append('}')
-        vmt_content = "\n".join(vmt_lines) + "\n"
+        
+        # Create the UI version (NO COMMENT AT THE BOTTOM)
+        vmt_content_ui = "\n".join(vmt_lines) + "\n"
         
         if not existing_text:
             existing_text = bpy.data.texts.new(text_name)
             
+        # Update Text Editor (Clean, no comment)
         existing_text.clear()
-        existing_text.write(vmt_content)
+        existing_text.write(vmt_content_ui)
         
-        state_parts = []
-        for k, v in current_state.items():
-            if isinstance(v, bool):
-                state_parts.append(f"{k}:{'1' if v else '0'}")
-            else:
-                state_parts.append(f"{k}:{v}")
-        state_str = "|".join(state_parts)
+        # Write state memory to custom invisible properties
+        state_str = "|".join([f"{k}:{v}" for k, v in current_state.items()])
         existing_text["sourceops_state"] = state_str
         
         existing_text.cursor_set(0, character=0)
@@ -236,38 +249,32 @@ class SOURCEOPS_OT_ResetVMT(bpy.types.Operator):
         # 2. Reset Text Editor in the background
         if existing_text:
             existing_text.clear()
-            if "sourceops_state" in existing_text:
-                del existing_text["sourceops_state"]
                 
             mat_subfolder = model.material_folder_items[0].name.replace('\\', '/').strip('/') if len(model.material_folder_items) > 0 else ''
             basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
+            
+            current_state = {
+                "basetexture": basetexture_path,
+                "bumpmap": "0",
+                "surfaceprop": model.surface if hasattr(model, 'surface') else 'default',
+                "translucent": "0",
+                "alphatest": "0",
+                "nocull": "0",
+                "envmap": "0"
+            }
+            state_str = "|".join([f"{k}:{v}" for k, v in current_state.items()])
             
             vmt_lines = [
                 '"VertexLitGeneric"',
                 '{',
                 f'    "$basetexture" "{basetexture_path}"',
-                f'    "$surfaceprop" "{model.surface}"',
+                f'    "$surfaceprop" "{model.surface if hasattr(model, "surface") else "default"}"',
                 '    "$model" 1',
                 '}'
             ]
             existing_text.write("\n".join(vmt_lines) + "\n")
             
-            current_state = {
-                "bumpmap": False, 
-                "translucent": False, 
-                "alphatest": False, 
-                "nocull": False, 
-                "envmap": False,
-                "basetexture": basetexture_path,
-                "surfaceprop": model.surface
-            }
-            state_parts = []
-            for k, v in current_state.items():
-                if isinstance(v, bool):
-                    state_parts.append(f"{k}:{'1' if v else '0'}")
-                else:
-                    state_parts.append(f"{k}:{v}")
-            state_str = "|".join(state_parts)
+            # Save empty state invisibly
             existing_text["sourceops_state"] = state_str
 
         self.report({'INFO'}, f"Reset VMT checkboxes and text editor for {mat_clean}!")
