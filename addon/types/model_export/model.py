@@ -585,33 +585,25 @@ class Model:
                         custom_lines = []
                         
                         if lines_to_parse:
-                            brace_level = 0
-                            in_main_block = False
                             for raw_line in lines_to_parse:
                                 stripped = raw_line.strip()
                                 if not stripped:
                                     continue
                                     
-                                if "{" in stripped and not stripped.startswith("$"):
-                                    brace_level += 1
-                                    in_main_block = True
-                                if "}" in stripped and not stripped.startswith("$"):
-                                    brace_level -= 1
+                                # Use bulletproof string matching instead of checking { brackets which breaks parsing
+                                lower_line = stripped.lower().replace('"', '')
+                                if lower_line in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: continue
+                                if lower_line in ["vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {"]: continue
+                                if stripped == "{" or stripped == "}": continue
                                     
                                 is_controlled = False
-                                if in_main_block and brace_level == 1 and stripped.startswith("$"):
-                                    first_word = stripped.split()[0].replace('"', '').lower()
-                                    if first_word in controlled_keys:
-                                        user_overrides[first_word] = raw_line.rstrip('\n')
+                                for c_key in controlled_keys:
+                                    if stripped.lower().startswith(c_key) or stripped.lower().startswith(f'"{c_key}"'):
+                                        user_overrides[c_key] = raw_line.rstrip('\n')
                                         is_controlled = True
+                                        break
                                         
                                 if not is_controlled:
-                                    clean_shader = stripped.replace('"', '').lower()
-                                    if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]:
-                                        continue
-                                    if clean_shader in ["vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {", "{", "}"]:
-                                        continue
-                                        
                                     custom_lines.append(raw_line.rstrip('\n'))
                                     
                         while custom_lines and not custom_lines[0].strip(): custom_lines.pop(0)
