@@ -828,7 +828,9 @@ class Model:
             print(f'[SourceOps] Exported: {path} in {round(time.time() - start, 1)} seconds')
 
     def get_all_objects(self, collection):
-        return common.remove_duplicates(collection.all_objects) if collection else []
+        if not collection: return []
+        valid_objects = [obj for obj in collection.all_objects if obj.name in bpy.context.view_layer.objects]
+        return common.remove_duplicates(valid_objects)
 
     def get_body_path(self, collection):
         name = common.clean_filename(collection.name)
@@ -919,7 +921,7 @@ class Model:
         if self.reference and has_lods:
             qc.write('\n// --- LOD SECTION ---\n')
             for dist, lod_col in lods:
-                if lod_col:
+                if lod_col and len(self.get_all_objects(lod_col)) > 0:
                     qc.write(f'$lod {dist}\n')
                     qc.write('{\n')
                     ref_name = common.clean_filename(self.reference.name)
@@ -948,13 +950,17 @@ class Model:
                 qc.write(f'\n$bodygroup "{bodygroup_name}" {{\n')
                 for collection in bodygroup.children:
                     name = common.clean_filename(collection.name)
-                    qc.write(f'    studio "{name}.{self.mesh_type}"\n')
+                    if len(self.get_all_objects(collection)) > 0:
+                        qc.write(f'    studio "{name}.{self.mesh_type}"\n')
+                    else:
+                        qc.write(f'    blank\n')
                 qc.write('}\n')
 
         if self.stacking:
             for collection in self.stacking.children:
-                name = common.clean_filename(collection.name)
-                qc.write(f'\n$model "{name}" "{name}.{self.mesh_type}"\n')
+                if len(self.get_all_objects(collection)) > 0:
+                    name = common.clean_filename(collection.name)
+                    qc.write(f'\n$model "{name}" "{name}.{self.mesh_type}"\n')
 
         if not self.sequence_items:
             qc.write('\n$sequence "idle" "anims/idle.SMD"\n')
