@@ -65,3 +65,4 @@ class SOURCEOPS_MaterialProps(bpy.types.PropertyGroup):
     vmt_alphatest: bpy.props.BoolProperty(name="$alphatest", default=False)
     vmt_nocull: bpy.props.BoolProperty(name="$nocull", default=False)
     vmt_envmap: bpy.props.BoolProperty(name="$envmap", description="Adds env_cubemap reflection properties", default=False)
+    do_not_sort_vmts: bpy.props.BoolProperty(name="Do Not Sort VMTs", description="When enabled, SourceOps will dump the VMT text block to disk exactly as-is, without any sorting or reformatting", default=False)

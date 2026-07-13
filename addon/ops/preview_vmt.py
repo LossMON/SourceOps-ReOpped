@@ -10,6 +10,7 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
     bl_description = 'Opens the VMT code in a Text Editor. The Text Editor has absolute priority unless you explicitly toggle UI checkboxes.'
 
     item_type: bpy.props.StringProperty()
+    is_global: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
         prefs = common.get_prefs(context)
@@ -17,7 +18,12 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
         sourceops = common.get_globals(context)
         model = common.get_model(sourceops)
         
-        if self.item_type == 'SKIN':
+        addon_name = common.clean_filename(Path(model.name).stem)
+        
+        if self.is_global:
+            config = model
+            mat_clean = f"GLOBAL_{addon_name}"
+        elif self.item_type == 'SKIN':
             skin_item = model.skin_items[model.skin_index]
             mat_clean = skin_item.name
             mat_config = next((m for m in model.material_items if m.name == mat_clean), None)
@@ -26,30 +32,39 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
             config = model.material_items[model.material_index]
             mat_clean = config.name
             
-        mat_subfolder = model.material_folder_items[0].name.replace('\\', '/').strip('/') if len(model.material_folder_items) > 0 else ''
-        basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
+        mat_raw = model.material_folder_items[0].name.replace('\\', '/').strip('/') if len(model.material_folder_items) > 0 else ''
+        
+        # QC Engine Path (Strips 'materials/')
+        mat_qc_path = mat_raw
+        while mat_qc_path.lower().startswith('materials/'):
+            mat_qc_path = mat_qc_path[10:]
+            
+        basetexture_path = f"{mat_qc_path}/{mat_clean}" if mat_qc_path else mat_clean
         surface_prop = model.surface if hasattr(model, 'surface') else 'default'
         
-        # Resolve target directory to read VMT from disk if missing
-        addon_name = common.clean_filename(Path(model.name).stem)
         create_material_folder = getattr(sourceops, 'auto_create_material_folder', True)
         use_addon_folder = getattr(sourceops, 'auto_use_addon_folder', True)
         
         if game and getattr(game, 'models', ''):
             models_path = Path(game.models)
+            
+            # Base output path to prevent duplicate directories
+            if models_path.name.lower() == 'models':
+                out_root = models_path.parent
+            else:
+                out_root = models_path
+                
+            # Smart Pathing Output resolution
             if create_material_folder:
                 if use_addon_folder:
-                    target_dir = models_path.joinpath(addon_name, 'materials', mat_subfolder)
+                    target_dir = out_root.joinpath(addon_name, 'materials', mat_qc_path)
                 else:
-                    if models_path.name.lower() == 'models':
-                        target_dir = models_path.parent.joinpath('materials', mat_subfolder)
-                    else:
-                        target_dir = models_path.joinpath('materials', mat_subfolder)
+                    target_dir = out_root.joinpath('materials', mat_qc_path)
             else:
                 if use_addon_folder:
-                    target_dir = models_path.joinpath(addon_name, 'models', mat_subfolder)
+                    target_dir = out_root.joinpath(addon_name, mat_raw)
                 else:
-                    target_dir = models_path.joinpath(mat_subfolder)
+                    target_dir = out_root.joinpath(mat_raw)
                     
             vmt_path = target_dir.joinpath(f"{mat_clean}.vmt")
         else:
@@ -63,6 +78,11 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
         vmt_trans = getattr(config, "vmt_translucent", False)
         vmt_alpha = getattr(config, "vmt_alphatest", False)
         
+        if self.is_global:
+            basetexture_display = "(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)"
+        else:
+            basetexture_display = basetexture_path
+        
         current_state = {
             "basetexture": basetexture_path,
             "bumpmap": "1" if generate_normal else "0",
@@ -70,13 +90,124 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
             "translucent": "1" if vmt_trans else "0",
             "alphatest": "1" if vmt_alpha else "0",
             "nocull": "1" if getattr(config, "vmt_nocull", False) else "0",
-            "envmap": "1" if getattr(config, "vmt_envmap", False) else "0"
+            "envmap": "1" if getattr(config, "vmt_envmap", False) else "0",
+            "is_global": "1" if self.is_global else "0"
         }
-        
+
+        do_not_sort = getattr(config, "do_not_sort_vmts", False) or getattr(model, "do_not_sort_vmts", False)
+
+        # -------------------------------------------------------------
+        # IF "DO NOT SORT" IS ENABLED: SMART PARSING
+        # -------------------------------------------------------------
+        if do_not_sort:
+            raw_lines = []
+            if existing_text and len(existing_text.lines) > 0:
+                raw_lines = [line.body for line in existing_text.lines]
+            elif vmt_path and vmt_path.is_file():
+                try:
+                    with open(vmt_path, 'r') as f:
+                        lines = f.read().splitlines()
+                    
+                    is_disk_global = False
+                    for line in reversed(lines):
+                        if line.strip().startswith("// [SourceOps_State]"):
+                            state_str_old = line.split("// [SourceOps_State]")[1].strip()
+                            for pair in state_str_old.split("|"):
+                                if ":" in pair and pair.split(":")[0] == "is_global":
+                                    is_disk_global = (pair.split(":")[1] == "1")
+                            break
+                            
+                    if not self.is_global and is_disk_global:
+                        lines = []
+                        
+                    raw_lines = [l for l in lines if not l.strip().startswith("// [SourceOps_State]")]
+                    raw_lines = [l for l in raw_lines if "DO NOT CHANGE THIS" not in l]
+                except:
+                    pass
+            
+            if not raw_lines:
+                raw_lines = [
+                    f'"{shader}"',
+                    '{',
+                    f'    "$basetexture" "{basetexture_display}"',
+                    f'    "$surfaceprop" "{surface_prop}"',
+                    '}'
+                ]
+            
+            # 1. Strip OFF properties from the text to keep it perfectly synced
+            cleaned_lines = []
+            for l in raw_lines:
+                lower_l = l.strip().lower()
+                if current_state["translucent"] == "0" and lower_l.startswith('"$translucent"'): continue
+                if current_state["alphatest"] == "0" and lower_l.startswith('"$alphatest"'): continue
+                if current_state["nocull"] == "0" and lower_l.startswith('"$nocull"'): continue
+                if current_state["bumpmap"] == "0" and lower_l.startswith('"$bumpmap"'): continue
+                if current_state["envmap"] == "0" and lower_l.startswith('"$envmap"'): continue
+                if current_state["envmap"] == "0" and lower_l.startswith('"$envmaptint"'): continue
+                if current_state["envmap"] == "0" and lower_l.startswith('"$reflectivity"'): continue
+                if current_state["envmap"] == "0" and lower_l.startswith('"$envmapblur"'): continue
+                if current_state["envmap"] == "0" and lower_l.startswith('"$normalmapalphaenvmapmask"'): continue
+                cleaned_lines.append(l)
+
+            # 2. Inject ON properties strictly under $surfaceprop
+            final_lines = []
+            injected = False
+            
+            def inject_properties(target_list):
+                if current_state["translucent"] == "1" and not any('"$translucent"' in xl.lower() for xl in cleaned_lines):
+                    target_list.append('    "$translucent" 1')
+                if current_state["alphatest"] == "1" and not any('"$alphatest"' in xl.lower() for xl in cleaned_lines):
+                    target_list.append('    "$alphatest" 1')
+                if current_state["nocull"] == "1" and not any('"$nocull"' in xl.lower() for xl in cleaned_lines):
+                    target_list.append('    "$nocull" 1')
+                if current_state["bumpmap"] == "1" and not any('"$bumpmap"' in xl.lower() for xl in cleaned_lines):
+                    bump_val = "(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)_normalmap" if self.is_global else f"{basetexture_path}_normalmap"
+                    target_list.append(f'    "$bumpmap" "{bump_val}"')
+                if current_state["envmap"] == "1" and not any('"$envmap"' in xl.lower() for xl in cleaned_lines):
+                    target_list.append('    "$envmap" "env_cubemap"')
+                    target_list.append('    "$envmaptint" "[.3 .3 .3]"')
+                    target_list.append('    "$reflectivity" "[1 1 1]"')
+                    target_list.append('    "$envmapblur" "1"')
+                    if current_state["bumpmap"] == "1" and not any('"$normalmapalphaenvmapmask"' in xl.lower() for xl in cleaned_lines):
+                        target_list.append('    "$normalmapalphaenvmapmask" 1')
+                        
+            for l in cleaned_lines:
+                if l.strip() == "}" and not injected:
+                    inject_properties(final_lines)
+                    injected = True
+                    
+                final_lines.append(l)
+                
+                # The exact spot to inject!
+                if not injected and "$surfaceprop" in l.lower():
+                    inject_properties(final_lines)
+                    injected = True
+                    
+            if not injected:
+                inject_properties(final_lines)
+                
+            if not existing_text:
+                existing_text = bpy.data.texts.new(text_name)
+            
+            existing_text.clear()
+            
+            if self.is_global and not any("DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in l for l in final_lines):
+                # Ensure the global comment stays attached at the top of the file
+                final_lines.insert(2, '    // (DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY, WILL BE REPLACED PER-MATERIAL ON EXPORT)')
+                
+            existing_text.write("\n".join(final_lines) + "\n")
+            state_str = "|".join([f"{k}:{v}" for k, v in current_state.items()])
+            existing_text["sourceops_state"] = state_str
+            
+            self._open_text_editor(context, existing_text, text_name)
+            return {'FINISHED'}
+
+        # -------------------------------------------------------------
+        # --- NORMAL PARSING LOGIC (DO NOT SORT IS FALSE) ---
+        # -------------------------------------------------------------
         lines_to_parse = []
         previous_state = {}
         
-        # Read from Text Editor OR Disk
         if existing_text and len(existing_text.lines) > 0:
             lines_to_parse = [line.body for line in existing_text.lines]
             state_str = existing_text.get("sourceops_state", "")
@@ -84,14 +215,13 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                 if ":" in pair:
                     k, v = pair.split(":", 1)
                     previous_state[k] = v
-        elif vmt_path.is_file():
+        elif vmt_path and vmt_path.is_file():
             try:
                 with open(vmt_path, 'r') as f:
                     lines_to_parse = f.read().splitlines()
             except:
                 pass
                 
-        # Extract the saved state comment from the disk file to preserve cross-session edits
         for line in reversed(lines_to_parse):
             if line.strip().startswith("// [SourceOps_State]"):
                 state_str_old = line.split("// [SourceOps_State]")[1].strip()
@@ -100,8 +230,12 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                         k, v = pair.split(":", 1)
                         previous_state[k] = v
                 break
+
+        # SHIELD SPECIFIC MATERIALS FROM INHERITING GLOBAL VMT EDITS FOUND IN THE DISK FILE
+        if not self.is_global and previous_state.get("is_global") == "1":
+            lines_to_parse = []
+            previous_state = {}
                 
-        # Strip the state comments so they are hidden from the text editor completely
         lines_to_parse = [l for l in lines_to_parse if not l.strip().startswith("// [SourceOps_State]")]
         
         controlled_keys = {
@@ -118,7 +252,9 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                 stripped = raw_line.strip()
                 if not stripped: continue
                 
-                # Use bulletproof string matching instead of checking { brackets which breaks parsing
+                # CLEAN IT OUT completely if a global template somehow made it in here
+                if "DO NOT CHANGE THIS" in stripped: continue
+                
                 lower_line = stripped.lower().replace('"', '')
                 if lower_line in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: continue
                 if lower_line in ["vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {"]: continue
@@ -135,35 +271,30 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                     custom_lines.append(raw_line.rstrip('\n'))
 
         vmt_lines = [f'"{shader}"', '{']
+        
+        if self.is_global:
+            vmt_lines.append('    // (DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY, WILL BE REPLACED PER-MATERIAL ON EXPORT)')
+            
         is_first_gen = not previous_state
         
         def process_key(key, ui_value, default_str):
-            prop_name = key[1:] # e.g. "$basetexture" -> "basetexture"
-            
-            # Check if the UI actively changed since last save, or if it's the very first generation
+            prop_name = key[1:]
             ui_changed = is_first_gen or (current_state.get(prop_name) != previous_state.get(prop_name))
-            
             if ui_changed:
                 if ui_value:
                     vmt_lines.append(default_str)
             else:
-                # The UI didn't change! We trust the user's manual edits.
-                # If it's in user_overrides, append it. If they deleted it, we append nothing!
                 if key in user_overrides:
                     vmt_lines.append(user_overrides[key])
 
-        # Core properties guaranteed to force if UI changed
-        process_key("$basetexture", True, f'    "$basetexture" "{basetexture_path}"')
+        process_key("$basetexture", True, f'    "$basetexture" "{basetexture_display}"')
         process_key("$surfaceprop", True, f'    "$surfaceprop" "{surface_prop}"')
         process_key("$model", True, '    "$model" 1')
-        
-        # Toggle properties
         process_key("$bumpmap", current_state["bumpmap"] == "1", f'    "$bumpmap" "{basetexture_path}_normalmap"')
         process_key("$translucent", current_state["translucent"] == "1", '    "$translucent" 1')
         process_key("$alphatest", current_state["alphatest"] == "1", '    "$alphatest" 1')
         process_key("$nocull", current_state["nocull"] == "1", '    "$nocull" 1')
         
-        # Environment Map Block
         ui_changed_envmap = is_first_gen or (current_state.get("envmap") != previous_state.get("envmap"))
         if ui_changed_envmap:
             if current_state["envmap"] == "1":
@@ -181,24 +312,23 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
         if custom_lines:
             vmt_lines.append('')
             for cl in custom_lines:
-                vmt_lines.append(cl) # Keep exactly as user formatted
+                vmt_lines.append(cl)
                     
         vmt_lines.append('}')
-        
-        # Create the UI version (NO COMMENT AT THE BOTTOM)
         vmt_content_ui = "\n".join(vmt_lines) + "\n"
         
         if not existing_text:
             existing_text = bpy.data.texts.new(text_name)
             
-        # Update Text Editor (Clean, no comment)
         existing_text.clear()
         existing_text.write(vmt_content_ui)
-        
-        # Write state memory to custom invisible properties
         state_str = "|".join([f"{k}:{v}" for k, v in current_state.items()])
         existing_text["sourceops_state"] = state_str
         
+        self._open_text_editor(context, existing_text, text_name)
+        return {'FINISHED'}
+
+    def _open_text_editor(self, context, existing_text, text_name):
         existing_text.cursor_set(0, character=0)
         bpy.ops.wm.window_new()
         new_window = context.window_manager.windows[-1]
@@ -209,9 +339,7 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
             area.spaces.active.top = 0
         except:
             pass
-        
         self.report({'INFO'}, f"Opened {text_name} in Text Editor!")
-        return {'FINISHED'}
 
 
 class SOURCEOPS_OT_ResetVMT(bpy.types.Operator):
@@ -221,12 +349,17 @@ class SOURCEOPS_OT_ResetVMT(bpy.types.Operator):
     bl_description = 'Resets the VMT UI checkboxes and wipes the custom text block entirely.'
 
     item_type: bpy.props.StringProperty()
+    is_global: bpy.props.BoolProperty(default=False)
 
     def execute(self, context):
         sourceops = common.get_globals(context)
         model = common.get_model(sourceops)
+        addon_name = common.clean_filename(Path(model.name).stem)
         
-        if self.item_type == 'SKIN':
+        if self.is_global:
+            config = model
+            mat_clean = f"GLOBAL_{addon_name}"
+        elif self.item_type == 'SKIN':
             skin_item = model.skin_items[model.skin_index]
             mat_clean = skin_item.name
             mat_config = next((m for m in model.material_items if m.name == mat_clean), None)
@@ -235,7 +368,7 @@ class SOURCEOPS_OT_ResetVMT(bpy.types.Operator):
             config = model.material_items[model.material_index]
             mat_clean = config.name
             
-        # 1. Reset UI Checkmarks
+        # RESET UI CHECKBOXES
         config.vmt_shader = 'VertexLitGeneric'
         config.vmt_translucent = False
         config.vmt_alphatest = False
@@ -246,35 +379,42 @@ class SOURCEOPS_OT_ResetVMT(bpy.types.Operator):
         text_name = f"VMT_{mat_clean}.vmt"
         existing_text = bpy.data.texts.get(text_name)
         
-        # 2. Reset Text Editor in the background
         if existing_text:
             existing_text.clear()
-                
-            mat_subfolder = model.material_folder_items[0].name.replace('\\', '/').strip('/') if len(model.material_folder_items) > 0 else ''
-            basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
+            mat_raw = model.material_folder_items[0].name.replace('\\', '/').strip('/') if len(model.material_folder_items) > 0 else ''
+            mat_qc_path = mat_raw
             
+            while mat_qc_path.lower().startswith('materials/'):
+                mat_qc_path = mat_qc_path[10:]
+                
+            basetexture_path = f"{mat_qc_path}/{mat_clean}" if mat_qc_path else mat_clean
+            
+            if self.is_global:
+                basetexture_display = "(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)"
+            else:
+                basetexture_display = basetexture_path
+
             current_state = {
-                "basetexture": basetexture_path,
-                "bumpmap": "0",
+                "basetexture": basetexture_path, "bumpmap": "0",
                 "surfaceprop": model.surface if hasattr(model, 'surface') else 'default',
-                "translucent": "0",
-                "alphatest": "0",
-                "nocull": "0",
-                "envmap": "0"
+                "translucent": "0", "alphatest": "0", "nocull": "0", "envmap": "0",
+                "is_global": "1" if self.is_global else "0"
             }
             state_str = "|".join([f"{k}:{v}" for k, v in current_state.items()])
+            sp = model.surface if hasattr(model, 'surface') else 'default'
             
             vmt_lines = [
-                '"VertexLitGeneric"',
-                '{',
-                f'    "$basetexture" "{basetexture_path}"',
-                f'    "$surfaceprop" "{model.surface if hasattr(model, "surface") else "default"}"',
-                '    "$model" 1',
-                '}'
+                '"VertexLitGeneric"', '{'
             ]
+            if self.is_global:
+                vmt_lines.append('    // (DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY, WILL BE REPLACED PER-MATERIAL ON EXPORT)')
+                
+            vmt_lines.extend([
+                f'    "$basetexture" "{basetexture_display}"',
+                f'    "$surfaceprop" "{sp}"',
+                '    "$model" 1', '}'
+            ])
             existing_text.write("\n".join(vmt_lines) + "\n")
-            
-            # Save empty state invisibly
             existing_text["sourceops_state"] = state_str
 
         self.report({'INFO'}, f"Reset VMT checkboxes and text editor for {mat_clean}!")

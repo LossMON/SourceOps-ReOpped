@@ -179,13 +179,24 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                     else: f_col2.prop(model, f"vtf_flag_{flag}")
                     
                 box.separator()
-                box.label(text='VMT Material Setup:', icon='SHADING_RENDERED')
+                box.label(text='VMT Material Setup (Global):', icon='SHADING_RENDERED')
                 col = common.split_column(box)
                 col.prop(model, 'vmt_shader')
                 col.prop(model, 'vmt_translucent')
                 col.prop(model, 'vmt_alphatest')
                 col.prop(model, 'vmt_nocull')
                 col.prop(model, 'vmt_envmap')
+
+                box.separator()
+                box.label(text='Global VMT Editor:', icon='TEXT')
+                row = box.row(align=True)
+                row.scale_y = 1.2
+                op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT (Global)', icon='TEXT')
+                op.is_global = True
+                op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
+                op2.is_global = True
+                row2 = box.row(align=True)
+                row2.prop(model, 'do_not_sort_vmts', icon='PINNED')
 
         elif model and sourceops.panel == 'MODEL_OPTIONS':
             box = layout.box()
@@ -535,8 +546,14 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
         row.scale_y = 1.2
         op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT', icon='TEXT')
         op.item_type = item_type
+        op.is_global = False # PREVENTS UI BLEED!
+        
         op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
         op2.item_type = item_type
+        op2.is_global = False # PREVENTS UI BLEED!
+        
+        row3 = box.row(align=True)
+        row3.prop(config, 'do_not_sort_vmts', icon='PINNED')
 
     def draw_list_buttons(self, layout, item):
         op = layout.operator('sourceops.list_operator', text='', icon='ADD')
