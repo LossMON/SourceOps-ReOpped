@@ -121,7 +121,7 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                         lines = []
                         
                     raw_lines = [l for l in lines if not l.strip().startswith("// [SourceOps_State]")]
-                    raw_lines = [l for l in raw_lines if "DO NOT CHANGE THIS" not in l]
+                    raw_lines = [l for l in raw_lines if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" not in l]
                 except:
                     pass
             
@@ -253,7 +253,7 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                 if not stripped: continue
                 
                 # CLEAN IT OUT completely if a global template somehow made it in here
-                if "DO NOT CHANGE THIS" in stripped: continue
+                if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in stripped: continue
                 
                 lower_line = stripped.lower().replace('"', '')
                 if lower_line in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: continue
@@ -278,25 +278,29 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
         is_first_gen = not previous_state
         
         def process_key(key, ui_value, default_str):
-            prop_name = key[1:]
+            prop_name = key[1:] # e.g. "$basetexture" -> "basetexture"
             ui_changed = is_first_gen or (current_state.get(prop_name) != previous_state.get(prop_name))
-            if ui_changed:
+            
+            # Absolute foolproof safety net: force it to append if missing from memory entirely
+            if ui_changed or key not in user_overrides:
                 if ui_value:
                     vmt_lines.append(default_str)
             else:
-                if key in user_overrides:
-                    vmt_lines.append(user_overrides[key])
+                vmt_lines.append(user_overrides[key])
 
         process_key("$basetexture", True, f'    "$basetexture" "{basetexture_display}"')
         process_key("$surfaceprop", True, f'    "$surfaceprop" "{surface_prop}"')
         process_key("$model", True, '    "$model" 1')
-        process_key("$bumpmap", current_state["bumpmap"] == "1", f'    "$bumpmap" "{basetexture_path}_normalmap"')
+        
+        bump_val = "(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)_normalmap" if self.is_global else f"{basetexture_path}_normalmap"
+        process_key("$bumpmap", current_state["bumpmap"] == "1", f'    "$bumpmap" "{bump_val}"')
+        
         process_key("$translucent", current_state["translucent"] == "1", '    "$translucent" 1')
         process_key("$alphatest", current_state["alphatest"] == "1", '    "$alphatest" 1')
         process_key("$nocull", current_state["nocull"] == "1", '    "$nocull" 1')
         
         ui_changed_envmap = is_first_gen or (current_state.get("envmap") != previous_state.get("envmap"))
-        if ui_changed_envmap:
+        if ui_changed_envmap or "$envmap" not in user_overrides:
             if current_state["envmap"] == "1":
                 vmt_lines.append('    "$envmap" "env_cubemap"')
                 if current_state["bumpmap"] == "1":

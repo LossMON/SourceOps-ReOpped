@@ -525,10 +525,24 @@ class Model:
                     mat_config = next((m for m in self.material_items if m.name == mat_clean), None)
                     config = mat_config if mat_config else self.model_props
                     
+                    used_global_text = False
+                    existing_text = None
+                    
                     if mat_config:
+                        # Material is explicitly listed -> Use its specific text block
                         print(f"[SourceOps] Found Material override settings for '{mat_clean}'.")
+                        text_name = f"VMT_{mat_clean}.vmt"
+                        existing_text = bpy.data.texts.get(text_name)
                     else:
+                        # Material is NOT listed -> Force Global VMT usage
                         print(f"[SourceOps] Using Global Model default settings for '{mat_clean}'.")
+                        global_text_name = f"VMT_GLOBAL_{self.stem}.vmt"
+                        existing_text = bpy.data.texts.get(global_text_name)
+                        if not existing_text: # Legacy support
+                            existing_text = bpy.data.texts.get("VMT_GLOBAL_SETTINGS.vmt")
+                            
+                        if existing_text:
+                            used_global_text = True
                     
                     img_or_color, is_gen, alpha_val, roughness_val, is_alpha_linked = self._get_material_texture_data(mat)
                     
@@ -536,21 +550,6 @@ class Model:
                     vmt_needs_update = self.overwrite_vmt or not vmt_path.is_file()
                     
                     if vmt_needs_update:
-                        text_name = f"VMT_{mat_clean}.vmt"
-                        existing_text = bpy.data.texts.get(text_name)
-                        used_global_text = False
-                        
-                        # Fallback to the global text block if this material doesn't have its own explicitly open text block
-                        if not existing_text:
-                            global_text_name = f"VMT_GLOBAL_{self.stem}.vmt"
-                            existing_text_global = bpy.data.texts.get(global_text_name)
-                            if not existing_text_global: # Legacy support
-                                existing_text_global = bpy.data.texts.get("VMT_GLOBAL_SETTINGS.vmt")
-                                
-                            if existing_text_global:
-                                existing_text = existing_text_global
-                                used_global_text = True
-                        
                         do_not_sort = getattr(config, "do_not_sort_vmts", False) or getattr(self.model_props, "do_not_sort_vmts", False)
                         basetexture_path = f"{mat_qc_path}/{mat_clean}" if mat_qc_path else mat_clean
                         surface_prop = self.surface if hasattr(self, 'surface') else getattr(self.model_props, 'surface', 'default')
@@ -579,6 +578,19 @@ class Model:
                                 try:
                                     with open(vmt_path, 'r') as f:
                                         raw_lines = f.read().splitlines()
+                                        
+                                    is_disk_global = False
+                                    for line in reversed(raw_lines):
+                                        if line.strip().startswith("// [SourceOps_State]"):
+                                            state_str_old = line.split("// [SourceOps_State]")[1].strip()
+                                            for pair in state_str_old.split("|"):
+                                                if ":" in pair and pair.split(":")[0] == "is_global":
+                                                    is_disk_global = (pair.split(":")[1] == "1")
+                                            break
+                                            
+                                    if not used_global_text and is_disk_global:
+                                        raw_lines = []
+                                        
                                     # Strip state saving comments
                                     raw_lines = [l for l in raw_lines if not l.strip().startswith("// [SourceOps_State]")]
                                 except:
@@ -671,8 +683,9 @@ class Model:
                             except Exception as e:
                                 print(f"[SourceOps ERROR] Could not write VMT: {e}")
                             
-                            # ONLY create/update a Blender text block if they explicitly have a mat_config or already had one
-                            if not used_global_text:
+                            # ONLY create/update a Blender text block if it is explicitly listed in Material Properties
+                            if mat_config:
+                                text_name = f"VMT_{mat_clean}.vmt"
                                 text_to_write = bpy.data.texts.get(text_name)
                                 if not text_to_write:
                                     text_to_write = bpy.data.texts.new(text_name)
@@ -692,6 +705,7 @@ class Model:
                                 for line in existing_text.lines:
                                     body = line.body
                                     if used_global_text:
+                                        body = body.replace('"(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)"', f'"{basetexture_path}"')
                                         body = body.replace("(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)", basetexture_path)
                                         if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in body:
                                             continue
@@ -702,11 +716,6 @@ class Model:
                                     if ":" in pair:
                                         k, v = pair.split(":", 1)
                                         previous_state[k] = v
-                                        
-                                if used_global_text:
-                                    # Shield the global basetexture placeholder from resetting the UI change logic
-                                    previous_state["basetexture"] = basetexture_path
-                                    previous_state["is_global"] = "0"
                             
                             elif vmt_path.is_file():
                                 try:
@@ -747,8 +756,8 @@ class Model:
                                     stripped = raw_line.strip()
                                     if not stripped: continue
                                     
-                                    # CLEAN IT OUT completely if a global template somehow made it in here
-                                    if "DO NOT CHANGE THIS" in stripped: continue
+                                    # CLEAN IT OUT completely if a global template comment somehow made it in here
+                                    if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in stripped: continue
                                     
                                     lower_line = stripped.lower().replace('"', '')
                                     if lower_line in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: continue
@@ -771,19 +780,16 @@ class Model:
                             vmt_lines = [f'"{shader}"', '{']
                             is_first_gen = not previous_state
                             
-                            def ui_changed(key):
-                                return is_first_gen or (current_state.get(key) != previous_state.get(key))
-                                
                             def process_key(key, ui_value, default_str):
                                 prop_name = key[1:] # e.g. "$basetexture" -> "basetexture"
                                 ui_did_change = is_first_gen or (current_state.get(prop_name) != previous_state.get(prop_name))
                                 
-                                if ui_did_change:
+                                # Absolute foolproof safety net: force it to append if missing from memory entirely
+                                if ui_did_change or key not in user_overrides:
                                     if ui_value:
                                         vmt_lines.append(default_str)
                                 else:
-                                    if key in user_overrides:
-                                        vmt_lines.append(user_overrides[key])
+                                    vmt_lines.append(user_overrides[key])
     
                             # Core properties guaranteed to force if UI changed
                             process_key("$basetexture", True, f'    "$basetexture" "{basetexture_path}"')
@@ -798,7 +804,7 @@ class Model:
                             
                             # Environment Map Block
                             ui_changed_envmap = is_first_gen or (current_state.get("envmap") != previous_state.get("envmap"))
-                            if ui_changed_envmap:
+                            if ui_changed_envmap or "$envmap" not in user_overrides:
                                 if current_state["envmap"] == "1":
                                     vmt_lines.append('    "$envmap" "env_cubemap"')
                                     if current_state["bumpmap"] == "1":
@@ -821,16 +827,6 @@ class Model:
                             state_str = "|".join([f"{k}:{v}" for k, v in current_state.items()])
                             vmt_content = "\n".join(vmt_lines) + "\n"
                             
-                            # Create a specific text block for this material ONLY if it didn't inherit from Global
-                            if not used_global_text:
-                                text_to_write = bpy.data.texts.get(text_name)
-                                if not text_to_write:
-                                    text_to_write = bpy.data.texts.new(text_name)
-                                    
-                                text_to_write.clear()
-                                text_to_write.write(vmt_content)
-                                text_to_write["sourceops_state"] = state_str
-                            
                             try:
                                 with open(vmt_path, 'w') as f: 
                                     f.write(vmt_content)
@@ -839,6 +835,18 @@ class Model:
                                 print(f"[SourceOps] Successfully wrote VMT: {vmt_path.name}")
                             except Exception as e: 
                                 print(f"[SourceOps ERROR] Failed to write VMT: {e}")
+
+                            # ONLY create/update a Blender text block if it is explicitly listed in Material Properties
+                            if mat_config:
+                                text_name = f"VMT_{mat_clean}.vmt"
+                                text_to_write = bpy.data.texts.get(text_name)
+                                if not text_to_write:
+                                    text_to_write = bpy.data.texts.new(text_name)
+                                    
+                                text_to_write.clear()
+                                text_to_write.write(vmt_content)
+                                text_to_write["sourceops_state"] = state_str
+                                
                     else:
                         print(f"[SourceOps] VMT file exists and Overwrite VMT is OFF. Skipping VMT for {mat_clean}.")
 
