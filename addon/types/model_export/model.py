@@ -1295,7 +1295,7 @@ class Model:
         if self.use_addon_folder:
             model = out_root.joinpath(addon_name, 'models', self.name)
         else:
-            model = out_root.joinpath('models', self.name)
+            model = self.models.joinpath(self.name)
             
         mdl = model.with_suffix('.mdl')
         dx90 = model.with_suffix('.dx90.vtx')
@@ -1326,7 +1326,7 @@ class Model:
         if self.use_addon_folder:
             model = out_root.joinpath(addon_name, 'models', self.name)
         else:
-            model = out_root.joinpath('models', self.name)
+            model = self.models.joinpath(self.name)
             
         mdl = model.with_suffix('.mdl')
         dx90 = model.with_suffix('.dx90.vtx')
@@ -1362,7 +1362,7 @@ class Model:
         if self.use_addon_folder:
             path_dst = out_root.joinpath(addon_name, 'models', self.name)
         else:
-            path_dst = out_root.joinpath('models', self.name)
+            path_dst = self.models.joinpath(self.name)
 
         if path_src == path_dst:
             return
@@ -1406,7 +1406,7 @@ class Model:
         if self.use_addon_folder:
             path_dst = out_root.joinpath(addon_name, 'models', self.name)
         else:
-            path_dst = out_root.joinpath('models', self.name)
+            path_dst = self.models.joinpath(self.name)
             
         path_dst.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1420,7 +1420,7 @@ class Model:
         if self.use_addon_folder:
             path_dst = out_root.joinpath(addon_name, 'models', self.name)
         else:
-            path_dst = out_root.joinpath('models', self.name)
+            path_dst = self.models.joinpath(self.name)
             
         for suffix in ('.dx90.vtx', '.dx80.vtx', '.sw.vtx', '.vvd', '.mdl', '.phy'):
             path = path_dst.with_suffix(suffix)

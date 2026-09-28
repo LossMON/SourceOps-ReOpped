@@ -246,6 +246,10 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             row = box.row()
             row.alignment = 'CENTER'
             row.label(text='Model Folders')
+            
+            row = box.row()
+            row.alignment = 'CENTER'
+            row.label(text='(No need to type "models/", it is created automatically)')
 
             row = box.row()
             row.template_list('SOURCEOPS_UL_ModelFolderList', '', model, 'model_folder_items', model, 'model_folder_index', rows=3)

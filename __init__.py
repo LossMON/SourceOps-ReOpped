@@ -1,50 +1,33 @@
+bl_info = {
+    'name': 'SourceOps ReOpped',
+    'author': 'bonjorno7, Almaas, Cabbage McGravel, CryptAlchemy, Gorange, Krystian, RED_EYE, SethTooQuick, Yonder, Blueberry_pie, Glad_BR',
+    'description': 'REMAKED BY: LESSMAN (A more convenient alternative to Blender Source Tools)',
+    'blender': (2, 83, 0),
+    'version': (0, 8, 8),
+    'location': '3D View > Sidebar',
+    'category': 'Import-Export',
+}
+
 import bpy
 import os
-from . import utils
-from . import props
-from . import icons
-from . import ops
-from . import ui
-from .vhacd_collision import vhacd
-
-# Try to load the newly unzipped X3D Importer natively
-try:
-    from . import io_scene_x3d
-    has_x3d = True
-except ImportError as e:
-    print(f"[SourceOps WARNING] Could not find the 'io_scene_x3d' folder. Did you rename it? ({e})")
-    has_x3d = False
+from . import addon
 
 def auto_restore():
+    """Runs automatically 0.5 seconds after Blender opens to restore your Games list!"""
     try:
-        filepath = utils.backup.filepath()
-        if os.path.exists(filepath):
-            utils.backup.restore(filepath)
-            print("[SourceOps] Auto-restored preferences and paths from backup.")
+        from .utils.backup import filepath, restore
+        path = filepath()
+        if os.path.exists(path):
+            restore(path)
+            print(f"[SourceOps] Auto-restored settings and Game Paths from backup.")
     except Exception as e:
         print(f"[SourceOps ERROR] Auto-restore failed: {e}")
-    return None # Prevents timer from repeating
+    return None
 
 def register():
-    props.register()
-    icons.register()
-    ops.register()
-    ui.register()
-    vhacd.register() # Registers the native V-HACD integration
-    
-    # Silently register the X3D importer in the background so V-HACD can use it
-    if has_x3d:
-        io_scene_x3d.register()
-    
-    # Runs the auto-restore a half second after Blender boots up
+    addon.register()
+    # Schedule the auto-restore to happen as soon as Blender is ready
     bpy.app.timers.register(auto_restore, first_interval=0.5)
 
 def unregister():
-    if has_x3d:
-        io_scene_x3d.unregister()
-        
-    vhacd.unregister() # Unregisters V-HACD
-    ui.unregister()
-    ops.unregister()
-    props.unregister()
-    icons.unregister()
+    addon.unregister()
