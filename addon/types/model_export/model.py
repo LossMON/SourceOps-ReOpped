@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 import time
 import subprocess
 import os
@@ -10,9 +10,11 @@ from math import degrees
 from shutil import move
 from pathlib import Path
 from traceback import print_exc
-from ... utils import common
-from . smd import SMD
-from . fbx import export_fbx
+
+# 3 DOTS HERE ARE REQUIRED SO IT GOES UP TO THE ROOT ADDON FOLDER!
+from ...utils import common
+from .smd import SMD
+from .fbx import export_fbx
 
 
 class Model:
@@ -25,6 +27,7 @@ class Model:
         if sourceops:
             self.use_addon_folder = getattr(sourceops, 'auto_use_addon_folder', True)
             self.create_material_folder = getattr(sourceops, 'auto_create_material_folder', True)
+            self.create_folders_alone = getattr(sourceops, 'auto_create_folders_alone', False)
             self.overwrite_vtf = getattr(sourceops, 'auto_overwrite_vtf', True)
             self.overwrite_vmt = getattr(sourceops, 'auto_overwrite_vmt', True)
             self.max_threads = getattr(sourceops, 'auto_max_threads', 6)
@@ -32,6 +35,7 @@ class Model:
         else:
             self.use_addon_folder = False
             self.create_material_folder = True
+            self.create_folders_alone = False
             self.overwrite_vtf = True
             self.overwrite_vmt = True
             self.max_threads = 6
@@ -44,15 +48,21 @@ class Model:
         self.bin = Path(game.bin)
         
         self.model_folder_items = getattr(model, 'model_folder_items', None)
-        mod_subfolder = self.model_folder_items[0].name.replace('\\', '/').strip('/') if (self.model_folder_items and len(self.model_folder_items) > 0) else ''
+        self.mod_raw = self.model_folder_items[0].name.replace('\\', '/').strip('/') if (self.model_folder_items and len(self.model_folder_items) > 0) else ''
         
         base_name = Path(model.name).with_suffix('').as_posix()
-        if mod_subfolder:
-            self.name = f"{mod_subfolder}/{base_name}"
+        self.stem = common.clean_filename(Path(base_name).stem)
+        
+        # Smart Pathing: Strip "models/" prefix specifically for the QC file to prevent double prefixes in engine
+        self.mod_qc_path = self.mod_raw
+        while self.mod_qc_path.lower().startswith('models/'):
+            self.mod_qc_path = self.mod_qc_path[7:]
+            
+        # ALWAYS include base_name so the compiled MDL filename is preserved accurately.
+        if self.mod_qc_path:
+            self.name = f"{self.mod_qc_path}/{base_name}"
         else:
             self.name = base_name
-            
-        self.stem = common.clean_filename(Path(base_name).stem)
 
         if model.static and model.static_prop_combine:
             self.modelsrc = self.game.parent.parent.joinpath('content', self.game.name, 'models')
@@ -63,10 +73,8 @@ class Model:
         self.mapsrc = Path(game.mapsrc)
         self.mesh_type = game.mesh_type
 
-        if model.static and model.static_prop_combine:
-            directory = self.modelsrc.joinpath(self.name).parent
-        else:
-            directory = self.modelsrc.joinpath(self.name)
+        # STRICT FOLDER CREATION: Only use the exact model name for the modelsrc export folder!
+        directory = self.modelsrc.joinpath(self.stem)
             
         self.directory = common.verify_folder(directory)
 
@@ -325,6 +333,7 @@ class Model:
     def _convert_to_vtf(self, tga_path, vtf_path, config, is_normal):
         # ATTEMPT NATIVE PYVTFLIB (MareTF)
         try:
+            # 3 DOTS HERE ALSO TO BE SAFE
             from ...PyVTFlib import ops as pyvtf_ops, VTFConvertOptions, IMAGE_FORMAT, VTF_FLAG, VTFResizeOptions, RESIZE_METHOD, RESIZE_FILTER, MODE, VERSION
             
             fmt_str = getattr(config, "vtf_format", "DXT5")
@@ -336,7 +345,7 @@ class Model:
             flag_mapping = {
                 "POINTSAMPLE": "POINT_SAMPLE", "TRILINEAR": "TRILINEAR", "CLAMPS": "CLAMP_S",
                 "CLAMPT": "CLAMP_T", "ANISOTROPIC": "ANISOTROPIC", "NORMAL": "NORMAL",
-                "NOLOD": "NO_LOD", "PROCEDURAL": "PROCEDURAL", "RENDERTARGET": "RENDERTARGET",
+                "NOLOD": "NO_LOD", "MINMIP": "LOAD_SMALL_MIPS", "PROCEDURAL": "PROCEDURAL", "RENDERTARGET": "RENDERTARGET",
                 "DEPTHRENDERTARGET": "DEPTH_RENDERTARGET", "NODEBUGOVERRIDE": "NO_DEBUG_OVERRIDE",
                 "SINGLECOPY": "SINGLE_COPY", "NODEPTHBUFFER": "NO_DEPTH_BUFFER", "CLAMPU": "CLAMP_U",
                 "VERTEXTEXTURE": "VERTEX_TEXTURE", "SSBUMP": "SSBUMP", "BORDER": "BORDER",
@@ -370,7 +379,7 @@ class Model:
             except KeyError: 
                 filter_enum = RESIZE_FILTER.DEFAULT
                 
-            disable_mips = getattr(config, "vtf_nomipmaps", False)
+            disable_mips = getattr(config, "vtf_nomipmaps", False) or getattr(config, "vtf_flag_NOMIP", False)
             
             options = VTFConvertOptions(
                 input_path=Path(tga_path),
@@ -382,7 +391,7 @@ class Model:
                 resize=resize_options,
                 normal=None, # Already baked inside python! Avoid double scaling/inversions
                 disable_mips=disable_mips,
-                version=VERSION.V7_2
+                version=VERSION.V7_4
             )
             vtf_ops = pyvtf_ops()
             
@@ -444,22 +453,33 @@ class Model:
         print(f"[SourceOps] ========================================")
 
         addon_name = self.stem
-        mat_subfolder = self.material_folder_items[0].name.replace('\\', '/').strip('/') if self.material_folder_items else ''
+        mat_raw = self.material_folder_items[0].name.replace('\\', '/').strip('/') if self.material_folder_items else ''
         
-        # --- STRICTLY ONE EXPORT LOCATION BASED ON SETTINGS ---
-        if self.create_material_folder:
+        # Determine QC internal path for material folders
+        mat_qc_path = mat_raw
+        while mat_qc_path.lower().startswith('materials/'):
+            mat_qc_path = mat_qc_path[10:]
+            
+        # Get base output paths avoiding duplicate 'models' or 'materials'
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+        
+        # --- SMART PATHING FOR MATERIAL LOCATION ---
+        if getattr(self, 'create_folders_alone', False):
+            target_dir = out_root.joinpath('materials', mat_qc_path)
+        elif self.create_material_folder:
             if use_addon_folder:
-                target_dir = self.models.joinpath(addon_name, 'materials', mat_subfolder)
+                target_dir = out_root.joinpath(addon_name, 'materials', mat_qc_path)
             else:
-                if self.models.name.lower() == 'models':
-                    target_dir = self.models.parent.joinpath('materials', mat_subfolder)
-                else:
-                    target_dir = self.models.joinpath('materials', mat_subfolder)
+                target_dir = out_root.joinpath('materials', mat_qc_path)
         else:
             if use_addon_folder:
-                target_dir = self.models.joinpath(addon_name, 'models', mat_subfolder)
+                target_dir = out_root.joinpath(addon_name, mat_raw)
             else:
-                target_dir = self.models.joinpath(mat_subfolder)
+                # Disabling material folders means we put it exactly where the user asked!
+                target_dir = out_root.joinpath(mat_raw)
                 
         target_dir.mkdir(parents=True, exist_ok=True)
         # -----------------------------------------------------
@@ -470,9 +490,9 @@ class Model:
         objects = set()
         if self.reference: 
             objects.update(self.get_all_objects(self.reference))
-        for lod_col in [self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, self.lod_4_collection, self.lod_5_collection, self.lod_6_collection]:
-            if lod_col: 
-                objects.update(self.get_all_objects(lod_col))
+            
+        # WE EXPLICITLY DO NOT ADD LOD COLLECTIONS HERE SO THEIR MATERIALS ARE NEVER EXPORTED!
+        
         if self.bodygroups:
             for bg in self.bodygroups.children:
                 for col in bg.children: 
@@ -505,17 +525,28 @@ class Model:
                     vtf_path = target_dir.joinpath(f"{mat_clean}.vtf")
                     vtf_normal_path = target_dir.joinpath(f"{mat_clean}_normalmap.vtf")
                     
-                    # Look for explicit UI settings for this specific material in the Skin/Material Lists
+                    # Look for explicit UI settings for this specific material in the Material List
                     mat_config = next((m for m in self.material_items if m.name == mat_clean), None)
-                    skin_config = next((s for s in self.skin_items if s.name == mat_clean), None)
-                    config = skin_config if skin_config else (mat_config if mat_config else self.model_props)
+                    config = mat_config if mat_config else self.model_props
                     
-                    if skin_config:
-                        print(f"[SourceOps] Found Skin override settings for '{mat_clean}'.")
-                    elif mat_config:
+                    used_global_text = False
+                    existing_text = None
+                    
+                    if mat_config:
+                        # Material is explicitly listed -> Use its specific text block
                         print(f"[SourceOps] Found Material override settings for '{mat_clean}'.")
+                        text_name = f"VMT_{mat_clean}.vmt"
+                        existing_text = bpy.data.texts.get(text_name)
                     else:
+                        # Material is NOT listed -> Force Global VMT usage
                         print(f"[SourceOps] Using Global Model default settings for '{mat_clean}'.")
+                        global_text_name = f"VMT_GLOBAL_{self.stem}.vmt"
+                        existing_text = bpy.data.texts.get(global_text_name)
+                        if not existing_text: # Legacy support
+                            existing_text = bpy.data.texts.get("VMT_GLOBAL_SETTINGS.vmt")
+                            
+                        if existing_text:
+                            used_global_text = True
                     
                     img_or_color, is_gen, alpha_val, roughness_val, is_alpha_linked = self._get_material_texture_data(mat)
                     
@@ -523,122 +554,303 @@ class Model:
                     vmt_needs_update = self.overwrite_vmt or not vmt_path.is_file()
                     
                     if vmt_needs_update:
+                        do_not_sort = getattr(config, "do_not_sort_vmts", False) or getattr(self.model_props, "do_not_sort_vmts", False)
+                        basetexture_path = f"{mat_qc_path}/{mat_clean}" if mat_qc_path else mat_clean
+                        surface_prop = self.surface if hasattr(self, 'surface') else getattr(self.model_props, 'surface', 'default')
                         
-                        # --- SMART MERGER: Extract User's Custom Lines & Edits ---
-                        text_name = f"VMT_{mat_clean}.vmt"
-                        custom_text = bpy.data.texts.get(text_name)
-                        custom_lines = []
-                        user_overrides = {}
-                        controlled_keys = ["$basetexture", "$bumpmap", "$surfaceprop", "$model", "$translucent", "$alphatest", "$nocull", "$envmap", "$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"]
+                        current_state = {
+                            "basetexture": basetexture_path,
+                            "bumpmap": "1" if getattr(config, "vtf_normal_map", False) else "0",
+                            "surfaceprop": surface_prop,
+                            "translucent": "1" if getattr(config, "vmt_translucent", False) else "0",
+                            "alphatest": "1" if getattr(config, "vmt_alphatest", False) else "0",
+                            "nocull": "1" if getattr(config, "vmt_nocull", False) else "0",
+                            "envmap": "1" if getattr(config, "vmt_envmap", False) else "0",
+                            "is_global": "1" if used_global_text else "0"
+                        }
                         
-                        # First try Blender Text Editor, then fall back to physical VMT file
-                        lines_to_parse = []
-                        if custom_text:
-                            lines_to_parse = [line.body for line in custom_text.lines]
-                        elif vmt_path.is_file():
-                            try:
-                                with open(vmt_path, 'r') as f: 
-                                    lines_to_parse = f.readlines()
-                            except: 
-                                pass
-                            
-                        for raw_line in lines_to_parse:
-                            stripped = raw_line.strip()
-                            if stripped == "{" or stripped == "}": 
-                                continue
-                            
-                            clean_shader = stripped.replace('"', '').lower()
-                            if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
-                                continue
-                                    
-                            is_controlled = False
-                            if stripped:
-                                first_word = stripped.replace('"', '').split()[0].lower()
-                                if first_word in controlled_keys: 
-                                    user_overrides[first_word] = raw_line.rstrip('\n')
-                                    is_controlled = True
-                                    
-                            if not is_controlled:
-                                custom_lines.append(raw_line.rstrip('\n'))
-                                
-                        while custom_lines and not custom_lines[0].strip(): 
-                            custom_lines.pop(0)
-                        while custom_lines and not custom_lines[-1].strip(): 
-                            custom_lines.pop()
-
-                        def get_line(key, default_str):
-                            if key in user_overrides:
-                                val = user_overrides[key]
-                                if not val.startswith(' ') and not val.startswith('\t'):
-                                    return f'    {val}'
-                                return val
-                            return default_str
-
-                        # --- GENERATE VMT FROM UI ---
                         shader = getattr(config, "vmt_shader", "VertexLitGeneric")
-                        generate_normal = getattr(config, "vtf_normal_map", False)
-                        basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
+                        
+                        # -------------------------------------------------------------
+                        # DO NOT SORT VMTs: Smart Text Block Injection
+                        # -------------------------------------------------------------
+                        if do_not_sort:
+                            raw_lines = []
+                            if existing_text and len(existing_text.lines) > 0:
+                                raw_lines = [line.body for line in existing_text.lines]
+                            elif vmt_path.is_file():
+                                try:
+                                    with open(vmt_path, 'r') as f:
+                                        raw_lines = f.read().splitlines()
+                                        
+                                    is_disk_global = False
+                                    for line in reversed(raw_lines):
+                                        if line.strip().startswith("// [SourceOps_State]"):
+                                            state_str_old = line.split("// [SourceOps_State]")[1].strip()
+                                            for pair in state_str_old.split("|"):
+                                                if ":" in pair and pair.split(":")[0] == "is_global":
+                                                    is_disk_global = (pair.split(":")[1] == "1")
+                                            break
+                                            
+                                    if not used_global_text and is_disk_global:
+                                        raw_lines = []
+                                        
+                                    # Strip state saving comments
+                                    raw_lines = [l for l in raw_lines if not l.strip().startswith("// [SourceOps_State]")]
+                                except:
+                                    pass
+                                    
+                            if not raw_lines:
+                                raw_lines = [
+                                    f'"{shader}"',
+                                    '{',
+                                    f'    "$basetexture" "{basetexture_path}"',
+                                    f'    "$surfaceprop" "{surface_prop}"',
+                                    '}'
+                                ]
+                            else:
+                                if used_global_text:
+                                    new_raw = []
+                                    for l in raw_lines:
+                                        if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in l:
+                                            continue
+                                        if "(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)" in l:
+                                            l = l.replace('"(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)"', f'"{basetexture_path}"')
+                                            l = l.replace("(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)", basetexture_path)
+                                        new_raw.append(l)
+                                    raw_lines = new_raw
+                                    
+                            # Step 1: Strip properties if they are turned OFF in the UI to ensure syncing
+                            cleaned_lines = []
+                            for l in raw_lines:
+                                lower_l = l.strip().lower()
+                                if current_state["translucent"] == "0" and lower_l.startswith('"$translucent"'): continue
+                                if current_state["alphatest"] == "0" and lower_l.startswith('"$alphatest"'): continue
+                                if current_state["nocull"] == "0" and lower_l.startswith('"$nocull"'): continue
+                                if current_state["bumpmap"] == "0" and lower_l.startswith('"$bumpmap"'): continue
+                                if current_state["envmap"] == "0" and lower_l.startswith('"$envmap"'): continue
+                                if current_state["envmap"] == "0" and lower_l.startswith('"$envmaptint"'): continue
+                                if current_state["envmap"] == "0" and lower_l.startswith('"$reflectivity"'): continue
+                                if current_state["envmap"] == "0" and lower_l.startswith('"$envmapblur"'): continue
+                                if current_state["envmap"] == "0" and lower_l.startswith('"$normalmapalphaenvmapmask"'): continue
+                                cleaned_lines.append(l)
 
-                        vmt_lines = [
-                            f'"{shader}"',
-                            '{',
-                            get_line("$basetexture", f'    "$basetexture" "{basetexture_path}"'),
-                        ]
-                        
-                        if generate_normal: 
-                            vmt_lines.append(get_line("$bumpmap", f'    "$bumpmap" "{basetexture_path}_normalmap"'))
-                        
-                        vmt_lines.append(get_line("$surfaceprop", f'    "$surfaceprop" "{self.surface}"'))
-                        vmt_lines.append(get_line("$model", '    "$model" 1'))
-                        
-                        vmt_trans = getattr(config, "vmt_translucent", False)
-                        vmt_alpha = getattr(config, "vmt_alphatest", False)
-                        
-                        if alpha_val < 0.9995:
-                            vmt_trans = True
-                            vmt_alpha = False
+                            # Step 2: Inject properties if turned ON, strictly beneath $surfaceprop
+                            final_lines = []
+                            injected = False
                             
-                        if vmt_trans: 
-                            vmt_lines.append(get_line("$translucent", '    "$translucent" 1'))
-                        if vmt_alpha: 
-                            vmt_lines.append(get_line("$alphatest", '    "$alphatest" 1'))
-                            
-                        if getattr(config, "vmt_nocull", False): 
-                            vmt_lines.append(get_line("$nocull", '    "$nocull" 1'))
-                        
-                        if getattr(config, "vmt_envmap", False):
-                            if generate_normal: 
-                                vmt_lines.append(get_line("$envmap", f'    "$envmap" "{basetexture_path}_normalmap"'))
-                            else: 
-                                vmt_lines.append(get_line("$envmap", '    "$envmap" "env_cubemap"'))
-                            vmt_lines.append(get_line("$normalmapalphaenvmapmask", '    "$normalmapalphaenvmapmask" 1'))
-                            vmt_lines.append(get_line("$envmaptint", '    "$envmaptint" "[.3 .3 .3]"'))
-                            vmt_lines.append(get_line("$reflectivity", '    "$reflectivity" "[1 1 1]"'))
-                            vmt_lines.append(get_line("$envmapblur", '    "$envmapblur" "1"'))
-                            
-                        # Inject the preserved custom lines
-                        if custom_lines:
-                            vmt_lines.append('')
-                            for cl in custom_lines:
-                                if cl.strip():
-                                    if not cl.startswith(' ') and not cl.startswith('\t'): 
-                                        vmt_lines.append(f'    {cl}')
-                                    else: 
-                                        vmt_lines.append(cl)
-                                else:
-                                    vmt_lines.append('')
+                            def inject_properties(target_list):
+                                if current_state["translucent"] == "1" and not any('"$translucent"' in xl.lower() for xl in cleaned_lines):
+                                    target_list.append('    "$translucent" 1')
+                                if current_state["alphatest"] == "1" and not any('"$alphatest"' in xl.lower() for xl in cleaned_lines):
+                                    target_list.append('    "$alphatest" 1')
+                                if current_state["nocull"] == "1" and not any('"$nocull"' in xl.lower() for xl in cleaned_lines):
+                                    target_list.append('    "$nocull" 1')
+                                if current_state["bumpmap"] == "1" and not any('"$bumpmap"' in xl.lower() for xl in cleaned_lines):
+                                    bump_val = f"{basetexture_path}_normalmap"
+                                    target_list.append(f'    "$bumpmap" "{bump_val}"')
+                                if current_state["envmap"] == "1" and not any('"$envmap"' in xl.lower() for xl in cleaned_lines):
+                                    target_list.append('    "$envmap" "env_cubemap"')
+                                    target_list.append('    "$envmaptint" "[.3 .3 .3]"')
+                                    target_list.append('    "$reflectivity" "[1 1 1]"')
+                                    target_list.append('    "$envmapblur" "1"')
+                                    if current_state["bumpmap"] == "1" and not any('"$normalmapalphaenvmapmask"' in xl.lower() for xl in cleaned_lines):
+                                        target_list.append('    "$normalmapalphaenvmapmask" 1')
+                                        
+                            for l in cleaned_lines:
+                                # Ensure we inject before the end bracket if no surfaceprop existed
+                                if l.strip() == "}" and not injected:
+                                    inject_properties(final_lines)
+                                    injected = True
+                                    
+                                final_lines.append(l)
                                 
-                        vmt_lines.append('}\n')
-                        vmt_content = "\n".join(vmt_lines)
-                        
-                        try:
-                            with open(vmt_path, 'w') as f: 
-                                f.write(vmt_content)
-                            if addon_dir:
-                                shutil.copy2(vmt_path, addon_dir.joinpath(f"{mat_clean}.vmt"))
-                            print(f"[SourceOps] Successfully wrote VMT: {vmt_path.name}")
-                        except Exception as e: 
-                            print(f"[SourceOps ERROR] Failed to write VMT: {e}")
+                                # Inject directly below surfaceprop
+                                if not injected and "$surfaceprop" in l.lower():
+                                    inject_properties(final_lines)
+                                    injected = True
+                                    
+                            if not injected:
+                                inject_properties(final_lines)
+                                
+                            raw_content = "\n".join(final_lines)
+                            state_str = "|".join([f"{k}:{v}" for k, v in current_state.items()])
+                            if not raw_content.endswith('\n'):
+                                raw_content += '\n'
+                                
+                            try:
+                                with open(vmt_path, 'w') as f:
+                                    f.write(raw_content)
+                                if addon_dir:
+                                    shutil.copy2(vmt_path, addon_dir.joinpath(f"{mat_clean}.vmt"))
+                                print(f"[SourceOps] 'Do Not Sort VMTs' enabled - dumped text block completely raw for {mat_clean}.vmt")
+                            except Exception as e:
+                                print(f"[SourceOps ERROR] Could not write VMT: {e}")
+                            
+                            # ONLY create/update a Blender text block if it is explicitly listed in Material Properties
+                            if mat_config:
+                                text_name = f"VMT_{mat_clean}.vmt"
+                                text_to_write = bpy.data.texts.get(text_name)
+                                if not text_to_write:
+                                    text_to_write = bpy.data.texts.new(text_name)
+                                text_to_write.clear()
+                                text_to_write.write(raw_content)
+                                text_to_write["sourceops_state"] = state_str
+
+                        else:
+                            # -------------------------------------------------------------
+                            # NORMAL PARSING & FORMAT SORTING
+                            # -------------------------------------------------------------
+                            lines_to_parse = []
+                            previous_state = {}
+                            
+                            # Only parse existing_text OR disk file to preserve user edits
+                            if existing_text and len(existing_text.lines) > 0:
+                                for line in existing_text.lines:
+                                    body = line.body
+                                    if used_global_text:
+                                        body = body.replace('"(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)"', f'"{basetexture_path}"')
+                                        body = body.replace("(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)", basetexture_path)
+                                        if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in body:
+                                            continue
+                                    lines_to_parse.append(body)
+                                
+                                state_str = existing_text.get("sourceops_state", "")
+                                for pair in state_str.split("|"):
+                                    if ":" in pair:
+                                        k, v = pair.split(":", 1)
+                                        previous_state[k] = v
+                            
+                            elif vmt_path.is_file():
+                                try:
+                                    with open(vmt_path, 'r') as f:
+                                        lines_to_parse = f.read().splitlines()
+                                except:
+                                    pass
+                                    
+                            # Extract the saved state comment from the disk file to preserve cross-session edits
+                            for line in reversed(lines_to_parse):
+                                if line.strip().startswith("// [SourceOps_State]"):
+                                    state_str_old = line.split("// [SourceOps_State]")[1].strip()
+                                    for pair in state_str_old.split("|"):
+                                        if ":" in pair:
+                                            k, v = pair.split(":", 1)
+                                            previous_state[k] = v
+                                    break
+    
+                            # SHIELD SPECIFIC MATERIALS FROM INHERITING GLOBAL VMT EDITS FOUND IN THE DISK FILE
+                            if not used_global_text and previous_state.get("is_global") == "1":
+                                lines_to_parse = []
+                                previous_state = {}
+                                    
+                            # Strip the state comments so they don't get written back into the file
+                            lines_to_parse = [l for l in lines_to_parse if not l.strip().startswith("// [SourceOps_State]")]
+                            
+                            controlled_keys = {
+                                "$basetexture", "$bumpmap", "$surfaceprop", "$model",
+                                "$translucent", "$alphatest", "$nocull", "$envmap",
+                                "$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"
+                            }
+                            
+                            user_overrides = {}
+                            custom_lines = []
+                            
+                            if lines_to_parse:
+                                for raw_line in lines_to_parse:
+                                    stripped = raw_line.strip()
+                                    if not stripped: continue
+                                    
+                                    # CLEAN IT OUT completely if a global template comment somehow made it in here
+                                    if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in stripped: continue
+                                    
+                                    lower_line = stripped.lower().replace('"', '')
+                                    if lower_line in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: continue
+                                    if lower_line in ["vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {"]: continue
+                                    if stripped == "{" or stripped == "}": continue
+                                        
+                                    is_controlled = False
+                                    for c_key in controlled_keys:
+                                        if stripped.lower().startswith(c_key) or stripped.lower().startswith(f'"{c_key}"'):
+                                            user_overrides[c_key] = raw_line.rstrip('\n')
+                                            is_controlled = True
+                                            break
+                                            
+                                    if not is_controlled:
+                                        custom_lines.append(raw_line.rstrip('\n'))
+                                        
+                            while custom_lines and not custom_lines[0].strip(): custom_lines.pop(0)
+                            while custom_lines and not custom_lines[-1].strip(): custom_lines.pop()
+    
+                            vmt_lines = [f'"{shader}"', '{']
+                            is_first_gen = not previous_state
+                            
+                            def process_key(key, ui_value, default_str):
+                                prop_name = key[1:] # e.g. "$basetexture" -> "basetexture"
+                                ui_did_change = is_first_gen or (current_state.get(prop_name) != previous_state.get(prop_name))
+                                
+                                # Absolute foolproof safety net: force it to append if missing from memory entirely
+                                if ui_did_change or key not in user_overrides:
+                                    if ui_value:
+                                        vmt_lines.append(default_str)
+                                else:
+                                    vmt_lines.append(user_overrides[key])
+    
+                            # Core properties guaranteed to force if UI changed
+                            process_key("$basetexture", True, f'    "$basetexture" "{basetexture_path}"')
+                            process_key("$surfaceprop", True, f'    "$surfaceprop" "{surface_prop}"')
+                            process_key("$model", True, '    "$model" 1')
+                            
+                            # Toggle properties
+                            process_key("$bumpmap", current_state["bumpmap"] == "1", f'    "$bumpmap" "{basetexture_path}_normalmap"')
+                            process_key("$translucent", current_state["translucent"] == "1", '    "$translucent" 1')
+                            process_key("$alphatest", current_state["alphatest"] == "1", '    "$alphatest" 1')
+                            process_key("$nocull", current_state["nocull"] == "1", '    "$nocull" 1')
+                            
+                            # Environment Map Block
+                            ui_changed_envmap = is_first_gen or (current_state.get("envmap") != previous_state.get("envmap"))
+                            if ui_changed_envmap or "$envmap" not in user_overrides:
+                                if current_state["envmap"] == "1":
+                                    vmt_lines.append('    "$envmap" "env_cubemap"')
+                                    if current_state["bumpmap"] == "1":
+                                        vmt_lines.append('    "$normalmapalphaenvmapmask" 1')
+                                    vmt_lines.append('    "$envmaptint" "[.3 .3 .3]"')
+                                    vmt_lines.append('    "$reflectivity" "[1 1 1]"')
+                                    vmt_lines.append('    "$envmapblur" "1"')
+                            else:
+                                for k in ["$envmap", "$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"]:
+                                    if k in user_overrides:
+                                        vmt_lines.append(user_overrides[k])
+    
+                            if custom_lines:
+                                vmt_lines.append('')
+                                for cl in custom_lines:
+                                    vmt_lines.append(cl) # Keep exactly as user formatted
+                                        
+                            vmt_lines.append('}')
+                            
+                            state_str = "|".join([f"{k}:{v}" for k, v in current_state.items()])
+                            vmt_content = "\n".join(vmt_lines) + "\n"
+                            
+                            try:
+                                with open(vmt_path, 'w') as f: 
+                                    f.write(vmt_content)
+                                if addon_dir:
+                                    shutil.copy2(vmt_path, addon_dir.joinpath(f"{mat_clean}.vmt"))
+                                print(f"[SourceOps] Successfully wrote VMT: {vmt_path.name}")
+                            except Exception as e: 
+                                print(f"[SourceOps ERROR] Failed to write VMT: {e}")
+
+                            # ONLY create/update a Blender text block if it is explicitly listed in Material Properties
+                            if mat_config:
+                                text_name = f"VMT_{mat_clean}.vmt"
+                                text_to_write = bpy.data.texts.get(text_name)
+                                if not text_to_write:
+                                    text_to_write = bpy.data.texts.new(text_name)
+                                    
+                                text_to_write.clear()
+                                text_to_write.write(vmt_content)
+                                text_to_write["sourceops_state"] = state_str
+                                
                     else:
                         print(f"[SourceOps] VMT file exists and Overwrite VMT is OFF. Skipping VMT for {mat_clean}.")
 
@@ -784,7 +996,9 @@ class Model:
             print(f'[SourceOps] Exported: {path} in {round(time.time() - start, 1)} seconds')
 
     def get_all_objects(self, collection):
-        return common.remove_duplicates(collection.all_objects) if collection else []
+        if not collection: return []
+        valid_objects = [obj for obj in collection.all_objects if obj.name in bpy.context.view_layer.objects]
+        return common.remove_duplicates(valid_objects)
 
     def get_body_path(self, collection):
         name = common.clean_filename(collection.name)
@@ -808,7 +1022,7 @@ class Model:
         except:
             return self.report(f'Failed to open: {path}', exception=True)
 
-        qc.write(f'$modelname "{self.name}"\n\n')
+        qc.write(f'$modelname "{self.name}.mdl"\n\n')
 
         # FIX: Ensure paths always have a trailing slash for proper engine resolution
         if not self.material_folder_items:
@@ -816,6 +1030,10 @@ class Model:
         else:
             for material_folder in self.material_folder_items:
                 folder_name = material_folder.name.replace('\\', '/').strip('/')
+                
+                while folder_name.lower().startswith('materials/'):
+                    folder_name = folder_name[10:]
+                    
                 if folder_name:
                     qc.write(f'$cdmaterials "{folder_name}/"\n')
                 else:
@@ -875,7 +1093,7 @@ class Model:
         if self.reference and has_lods:
             qc.write('\n// --- LOD SECTION ---\n')
             for dist, lod_col in lods:
-                if lod_col:
+                if lod_col and len(self.get_all_objects(lod_col)) > 0:
                     qc.write(f'$lod {dist}\n')
                     qc.write('{\n')
                     ref_name = common.clean_filename(self.reference.name)
@@ -904,13 +1122,17 @@ class Model:
                 qc.write(f'\n$bodygroup "{bodygroup_name}" {{\n')
                 for collection in bodygroup.children:
                     name = common.clean_filename(collection.name)
-                    qc.write(f'    studio "{name}.{self.mesh_type}"\n')
+                    if len(self.get_all_objects(collection)) > 0:
+                        qc.write(f'    studio "{name}.{self.mesh_type}"\n')
+                    else:
+                        qc.write(f'    blank\n')
                 qc.write('}\n')
 
         if self.stacking:
             for collection in self.stacking.children:
-                name = common.clean_filename(collection.name)
-                qc.write(f'\n$model "{name}" "{name}.{self.mesh_type}"\n')
+                if len(self.get_all_objects(collection)) > 0:
+                    name = common.clean_filename(collection.name)
+                    qc.write(f'\n$model "{name}" "{name}.{self.mesh_type}"\n')
 
         if not self.sequence_items:
             qc.write('\n$sequence "idle" "anims/idle.SMD"\n')
@@ -1069,8 +1291,15 @@ class Model:
     def view_model(self):
         addon_name = self.stem
         
-        if self.use_addon_folder:
-            model = self.models.joinpath(addon_name, 'models', self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+            
+        if getattr(self, 'create_folders_alone', False):
+            model = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            model = out_root.joinpath(addon_name, 'models', self.name)
         else:
             model = self.models.joinpath(self.name)
             
@@ -1095,8 +1324,15 @@ class Model:
     def view_model_plusplus(self):
         addon_name = self.stem
         
-        if self.use_addon_folder:
-            model = self.models.joinpath(addon_name, 'models', self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+            
+        if getattr(self, 'create_folders_alone', False):
+            model = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            model = out_root.joinpath(addon_name, 'models', self.name)
         else:
             model = self.models.joinpath(self.name)
             
@@ -1125,8 +1361,16 @@ class Model:
         path_src = self.game.joinpath('models', self.name)
         addon_name = self.stem
         
-        if self.use_addon_folder:
-            path_dst = self.models.joinpath(addon_name, 'models', self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+
+        # Respect literal output structure ensuring 'models/' handles custom directories perfectly
+        if getattr(self, 'create_folders_alone', False):
+            path_dst = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            path_dst = out_root.joinpath(addon_name, 'models', self.name)
         else:
             path_dst = self.models.joinpath(self.name)
 
@@ -1164,12 +1408,34 @@ class Model:
 
     def ensure_models_folder(self):
         addon_name = self.stem
-        path_dst = self.models.joinpath(addon_name, 'models', self.name) if self.use_addon_folder else self.models.joinpath(self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+            
+        if getattr(self, 'create_folders_alone', False):
+            path_dst = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            path_dst = out_root.joinpath(addon_name, 'models', self.name)
+        else:
+            path_dst = self.models.joinpath(self.name)
+            
         path_dst.parent.mkdir(parents=True, exist_ok=True)
 
     def remove_models_old(self):
         addon_name = self.stem
-        path_dst = self.models.joinpath(addon_name, 'models', self.name) if self.use_addon_folder else self.models.joinpath(self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+            
+        if getattr(self, 'create_folders_alone', False):
+            path_dst = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            path_dst = out_root.joinpath(addon_name, 'models', self.name)
+        else:
+            path_dst = self.models.joinpath(self.name)
+            
         for suffix in ('.dx90.vtx', '.dx80.vtx', '.sw.vtx', '.vvd', '.mdl', '.phy'):
             path = path_dst.with_suffix(suffix)
             if path.is_file(): 

@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from . material_folder_props import SOURCEOPS_MaterialFolderProps
 from . model_folder_props import SOURCEOPS_ModelFolderProps
 from . material_props import SOURCEOPS_MaterialProps
@@ -43,7 +43,7 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     particle_index: bpy.props.IntProperty(default=0)
 
     export_checked: bpy.props.BoolProperty(name='Export', default=True)
-    name: bpy.props.StringProperty(name='Name', default='example/model')
+    name: bpy.props.StringProperty(name='Name', default='')
     rename_material: bpy.props.StringProperty(name='Rename Material', default='')
 
     def poll_armature(self, object): return object.type == 'ARMATURE'
@@ -141,3 +141,4 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     vmt_alphatest: bpy.props.BoolProperty(name="$alphatest", default=True) 
     vmt_nocull: bpy.props.BoolProperty(name="$nocull", default=False)
     vmt_envmap: bpy.props.BoolProperty(name="$envmap", description="Adds env_cubemap reflection properties", default=False)
+    do_not_sort_vmts: bpy.props.BoolProperty(name="Do Not Sort VMTs", description="When enabled, SourceOps will dump the VMT text block to disk exactly as-is, without any sorting or reformatting", default=False)
