@@ -8,28 +8,51 @@ from . attachment_props import SOURCEOPS_AttachmentProps
 from . particle_props import SOURCEOPS_ParticleProps
 from . surface_props import SOURCEOPS_SurfaceProps
 
-VTF_FORMATS =["RGBA8888", "ABGR8888", "RGB888", "BGR888", "RGB565", "I8", "IA88", "A8", "RGB888_BLUESCREEN", "BGR888_BLUESCREEN", "ARGB8888", "BGRA8888", "DXT1", "DXT3", "DXT5", "BGRX8888", "BGR565", "BGRX5551", "BGRA4444", "DXT1_ONEBITALPHA", "BGRA5551", "UV88", "UVWQ8888", "RGBA16161616F", "RGBA16161616", "UVLX8888"]
-VTF_RESIZE_METHODS =["NEAREST", "BIGGEST", "SMALLEST"]
-VTF_RESIZE_FILTERS =["POINT", "BOX", "TRIANGLE", "QUADRATIC", "CUBIC", "CATROM", "MITCHELL", "GAUSSIAN", "SINC", "BESSEL", "HANNING", "HAMMING", "BLACKMAN", "KAISER"]
-VTF_SHARPEN_FILTERS =["NONE", "NEGATIVE", "LIGHTER", "DARKER", "CONTRASTMORE", "CONTRASTLESS", "SMOOTHEN", "SHARPENSOFT", "SHARPENMEDIUM", "SHARPENSTRONG", "FINDEDGES", "CONTOUR", "EDGEDETECT", "EDGEDETECTSOFT", "EMBOSS", "MEANREMOVAL", "UNSHARP", "XSHARPEN", "WARPSHARP"]
-VTF_NORMAL_KERNELS =["4X", "3X3", "5X5", "7X7", "9X9", "DUDV"]
-VTF_NORMAL_HEIGHTS =["ALPHA", "AVERAGERGB", "BIASEDRGB", "RED", "GREEN", "BLUE", "MAXRGB", "COLORSPACE"]
-VTF_NORMAL_ALPHAS =["NOCHANGE", "HEIGHT", "BLACK", "WHITE"]
+def update_model_vtf_normal_map(self, context):
+    if self.vtf_normal_map:
+        has_assigned = any(getattr(m, 'normal_map', '').strip() for m in self.material_items)
+        if has_assigned:
+            self['vtf_normal_map'] = False
+            def _trigger_popup():
+                try:
+                    bpy.ops.sourceops.normal_map_popup('INVOKE_DEFAULT')
+                except Exception:
+                    pass
+                return None
+            bpy.app.timers.register(_trigger_popup, first_interval=0.01)
 
+VTF_FORMATS = ["RGBA8888", "ABGR8888", "RGB888", "BGR888", "RGB565", "I8", "IA88", "A8", "RGB888_BLUESCREEN", "BGR888_BLUESCREEN", "ARGB8888", "BGRA8888", "DXT1", "DXT3", "DXT5", "BGRX8888", "BGR565", "BGRX5551", "BGRA4444", "DXT1_ONEBITALPHA", "BGRA5551", "UV88", "UVWQ8888", "RGBA16161616F", "RGBA16161616", "UVLX8888"]
+VTF_RESIZE_METHODS = ["NEAREST", "BIGGEST", "SMALLEST"]
+VTF_RESIZE_FILTERS = ["POINT", "BOX", "TRIANGLE", "QUADRATIC", "CUBIC", "CATROM", "MITCHELL", "GAUSSIAN", "SINC", "BESSEL", "HANNING", "HAMMING", "BLACKMAN", "KAISER"]
+VTF_SHARPEN_FILTERS = ["NONE", "NEGATIVE", "LIGHTER", "DARKER", "CONTRASTMORE", "CONTRASTLESS", "SMOOTHEN", "SHARPENSOFT", "SHARPENMEDIUM", "SHARPENSTRONG", "FINDEDGES", "CONTOUR", "EDGEDETECT", "EDGEDETECTSOFT", "EMBOSS", "MEANREMOVAL", "UNSHARP", "XSHARPEN", "WARPSHARP"]
+VTF_NORMAL_KERNELS = ["4X", "3X3", "5X5", "7X7", "9X9", "DUDV"]
+VTF_NORMAL_HEIGHTS = ["ALPHA", "AVERAGERGB", "BIASEDRGB", "RED", "GREEN", "BLUE", "MAXRGB", "COLORSPACE"]
+VTF_NORMAL_ALPHAS = ["NOCHANGE", "HEIGHT", "BLACK", "WHITE"]
+
+VMT_ENVMAP_MASKS = [
+    ("NORMAL_ALPHA", "Normal Map Alpha ($normalmapalphaenvmapmask)", ""),
+    ("BASE_ALPHA", "Base Texture Alpha ($basealphaenvmapmask)", ""),
+    ("NONE", "None", "")
+]
+
+VMT_PHONG_MASKS = [
+    ("NORMAL_ALPHA", "Normal Map Alpha (Default)", ""),
+    ("BASE_ALPHA", "Base Texture Alpha ($basemapalphaphongmask)", "")
+]
 
 class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     material_folder_items: bpy.props.CollectionProperty(type=SOURCEOPS_MaterialFolderProps)
     material_folder_index: bpy.props.IntProperty(default=0)
-    
+
     model_folder_items: bpy.props.CollectionProperty(type=SOURCEOPS_ModelFolderProps)
     model_folder_index: bpy.props.IntProperty(default=0)
-    
+
     material_items: bpy.props.CollectionProperty(type=SOURCEOPS_MaterialProps)
     material_index: bpy.props.IntProperty(default=0, name='Ctrl click to rename')
 
     skin_items: bpy.props.CollectionProperty(type=SOURCEOPS_SkinProps)
     skin_index: bpy.props.IntProperty(default=0, name='Ctrl click to rename')
-    
+
     texturegroup_items: bpy.props.CollectionProperty(type=SOURCEOPS_MaterialFolderProps)
     texturegroup_index: bpy.props.IntProperty(default=0)
 
@@ -43,7 +66,7 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     particle_index: bpy.props.IntProperty(default=0)
 
     export_checked: bpy.props.BoolProperty(name='Export', default=True)
-    name: bpy.props.StringProperty(name='Name', default='example/model')
+    name: bpy.props.StringProperty(name='Name', default='')
     rename_material: bpy.props.StringProperty(name='Rename Material', default='')
 
     def poll_armature(self, object): return object.type == 'ARMATURE'
@@ -124,7 +147,7 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     vtf_nomipmaps: bpy.props.BoolProperty(name="Disable Mipmaps", default=False)
     vtf_mfilter: bpy.props.EnumProperty(name="Mip Filter", items=[(x, x, "") for x in VTF_RESIZE_FILTERS], default="KAISER")
     vtf_msharpen: bpy.props.EnumProperty(name="Mip Sharpen", items=[(x, x, "") for x in VTF_SHARPEN_FILTERS], default="SHARPENSOFT")
-    vtf_normal_map: bpy.props.BoolProperty(name="Generate Normal Map", default=False)
+    vtf_normal_map: bpy.props.BoolProperty(name="Generate Normal Map", default=False, update=update_model_vtf_normal_map)
     vtf_nkernel: bpy.props.EnumProperty(name="Kernel", items=[(x, x, "") for x in VTF_NORMAL_KERNELS], default="3X3")
     vtf_nheight: bpy.props.EnumProperty(name="Height Calc", items=[(x, x, "") for x in VTF_NORMAL_HEIGHTS], default="AVERAGERGB")
     vtf_nalpha: bpy.props.EnumProperty(name="Alpha Calc", items=[(x, x, "") for x in VTF_NORMAL_ALPHAS], default="NOCHANGE")
@@ -140,4 +163,20 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     vmt_translucent: bpy.props.BoolProperty(name="$translucent", default=False)
     vmt_alphatest: bpy.props.BoolProperty(name="$alphatest", default=True) 
     vmt_nocull: bpy.props.BoolProperty(name="$nocull", default=False)
-    vmt_envmap: bpy.props.BoolProperty(name="$envmap", description="Adds env_cubemap reflection properties", default=False)
+    
+    # Cubemap Reflection ($envmap)
+    vmt_envmap: bpy.props.BoolProperty(name="$envmap (Cubemap)", description="Adds env_cubemap reflection properties", default=False)
+    vmt_envmaptint: bpy.props.FloatVectorProperty(name="$envmaptint", subtype='COLOR', size=3, default=(0.3, 0.3, 0.3), min=0.0, max=2.0)
+    vmt_envmapfresnel: bpy.props.BoolProperty(name="$envmapfresnel", description="Reflectivity increases at glancing angles", default=False)
+    vmt_envmapmask_source: bpy.props.EnumProperty(name="Envmap Mask", items=VMT_ENVMAP_MASKS, default="NORMAL_ALPHA")
+
+    # Phong Specular ($phong)
+    vmt_phong: bpy.props.BoolProperty(name="$phong (Specular)", description="Enable Phong specular highlights", default=False)
+    vmt_phongboost: bpy.props.FloatProperty(name="$phongboost", description="Intensity of the specular highlight", default=1.0, min=0.0, precision=2)
+    vmt_phongexponent: bpy.props.IntProperty(name="$phongexponent", description="Tightness and sharpness of highlight (1-255)", default=25, min=1, max=255)
+    vmt_phongtint: bpy.props.FloatVectorProperty(name="$phongtint", subtype='COLOR', size=3, default=(1.0, 1.0, 1.0), min=0.0, max=1.0)
+    vmt_phongalbedotint: bpy.props.BoolProperty(name="$phongalbedotint", description="Tint specular highlights using base texture albedo color", default=False)
+    vmt_phongfresnelranges: bpy.props.StringProperty(name="$phongfresnelranges", description="Fresnel reflection multipliers [min mid max]", default="[0.05 0.5 1]")
+    vmt_phongmask_source: bpy.props.EnumProperty(name="Phong Mask", items=VMT_PHONG_MASKS, default="NORMAL_ALPHA")
+
+    do_not_sort_vmts: bpy.props.BoolProperty(name="Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)", description="When enabled, SourceOps will dump the VMT text block to disk exactly as-is, without any sorting or reformatting", default=False)

@@ -78,7 +78,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
 
             if model:
                 col = common.split_column(box)
-                col.prop(model, 'name')
+                col.prop(model, 'name', placeholder='Name of the .MDL model')
                 col.prop(model, 'armature')
                 col.prop(model, 'reference')
                 col.prop(model, 'collision')
@@ -172,20 +172,53 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                 f_col1 = flags_row.column()
                 f_col2 = flags_row.column()
                 
-                flags =["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
+                flags = ["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
                 
                 for i, flag in enumerate(flags):
                     if i < 10: f_col1.prop(model, f"vtf_flag_{flag}")
                     else: f_col2.prop(model, f"vtf_flag_{flag}")
                     
                 box.separator()
-                box.label(text='VMT Material Setup:', icon='SHADING_RENDERED')
+                box.label(text='VMT Material Setup (Global):', icon='SHADING_RENDERED')
                 col = common.split_column(box)
                 col.prop(model, 'vmt_shader')
                 col.prop(model, 'vmt_translucent')
                 col.prop(model, 'vmt_alphatest')
                 col.prop(model, 'vmt_nocull')
-                col.prop(model, 'vmt_envmap')
+
+                # Global Cubemap Reflection ($envmap)
+                box.separator()
+                box.label(text='Cubemap Reflection ($envmap):', icon='SHADING_TEXTURE')
+                col = common.split_column(box)
+                col.prop(model, 'vmt_envmap', text='Enable Cubemap ($envmap)')
+                if model.vmt_envmap:
+                    col.prop(model, 'vmt_envmaptint')
+                    col.prop(model, 'vmt_envmapfresnel')
+                    col.prop(model, 'vmt_envmapmask_source')
+
+                # Global Phong Specular ($phong)
+                box.separator()
+                box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
+                col = common.split_column(box)
+                col.prop(model, 'vmt_phong', text='Enable Phong ($phong)')
+                if model.vmt_phong:
+                    col.prop(model, 'vmt_phongboost')
+                    col.prop(model, 'vmt_phongexponent')
+                    col.prop(model, 'vmt_phongfresnelranges')
+                    col.prop(model, 'vmt_phongtint')
+                    col.prop(model, 'vmt_phongalbedotint')
+                    col.prop(model, 'vmt_phongmask_source')
+
+                box.separator()
+                box.label(text='Global VMT Editor:', icon='TEXT')
+                row = box.row(align=True)
+                row.scale_y = 1.2
+                op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT (Global)', icon='TEXT')
+                op.is_global = True
+                op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
+                op2.is_global = True
+                row2 = box.row(align=True)
+                row2.prop(model, 'do_not_sort_vmts', text='Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)', icon='PINNED')
 
         elif model and sourceops.panel == 'MODEL_OPTIONS':
             box = layout.box()
@@ -197,7 +230,6 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             col.prop(model, 'surface')
             col.prop(model, 'glass')
             col.prop(model, 'static')
-            col.prop(model, 'rename_material')
             row = col.row()
             row.enabled = model.static
             row.prop(model, 'static_prop_combine')
@@ -235,6 +267,10 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             row = box.row()
             row.alignment = 'CENTER'
             row.label(text='Model Folders')
+            
+            row = box.row()
+            row.alignment = 'CENTER'
+            row.label(text='(No need to type "models/", it is created automatically) Example: guns/pink_gun')
 
             row = box.row()
             row.template_list('SOURCEOPS_UL_ModelFolderList', '', model, 'model_folder_items', model, 'model_folder_index', rows=3)
@@ -250,6 +286,10 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             row = box.row()
             row.alignment = 'CENTER'
             row.label(text='Material Folders')
+
+            row = box.row()
+            row.alignment = 'CENTER'
+            row.label(text='(No need to type "materials/", it is created automatically) Example: guns/pink_gun')
 
             row = box.row()
             row.template_list('SOURCEOPS_UL_MaterialFolderList', '', model, 'material_folder_items', model, 'material_folder_index', rows=3)
@@ -275,6 +315,38 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             if material_item:
                 self.draw_texture_settings(box, material_item, 'MATERIAL')
 
+            # --- NORMAL MAP BOX ---
+            norm_box = layout.box()
+            norm_header = norm_box.row()
+            norm_header.alignment = 'CENTER'
+            norm_header.label(text='NormalMap', icon='TEXTURE')
+
+            if material_item:
+                norm_col = common.split_column(norm_box)
+                n_row = norm_col.row(align=True)
+                search_source = 'images' if len(bpy.data.images) > 0 else 'materials'
+                n_row.prop_search(material_item, 'normal_map', bpy.data, search_source, text='Assigned Normal')
+                n_row.operator('sourceops.auto_detect_normal_map', text='', icon='EYEDROPPER')
+                if material_item.normal_map:
+                    n_row.operator('sourceops.clear_normal_map', text='', icon='X')
+
+                # Parameters are always visible in the NormalMap box
+                norm_box.separator()
+                norm_box.label(text='Normal Map Settings (-normal):', icon='MATFLUID')
+                gen_col = common.split_column(norm_box)
+                gen_col.prop(material_item, 'vtf_nkernel')
+                gen_col.prop(material_item, 'vtf_nheight')
+                gen_col.prop(material_item, 'vtf_nalpha')
+                gen_col.prop(material_item, 'vtf_nscale')
+                gen_col.prop(material_item, 'vtf_nwrap')
+
+                if material_item.vtf_normal_map:
+                    norm_box.label(text='Mode: Generating new normal map from base texture', icon='INFO')
+                elif material_item.normal_map:
+                    norm_box.label(text='Mode: Using assigned normal map from model', icon='CHECKMARK')
+            else:
+                norm_box.label(text='Select a material above to configure Normal Map', icon='INFO')
+
             # --- SKINS (OVERRIDES) LIST ---
             box = layout.box()
             row = box.row()
@@ -288,8 +360,18 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
 
             if skin:
                 col = common.split_column(box)
-                col.prop(skin, 'name')
-                col.prop(skin, 'linked_materials', text="Linked Mats (Space Separated)")
+                col.prop_search(skin, 'name', bpy.data, 'materials', text='Skin Material')
+                col.prop(skin, 'linked_materials', text="Linked Mats")
+
+                linked_mats = [m for m in skin.linked_materials.split() if m]
+                if linked_mats:
+                    box_links = box.box()
+                    box_links.label(text="Linked Materials (Click X to remove):", icon='LINKED')
+                    for l_mat in linked_mats:
+                        p_row = box_links.row(align=True)
+                        p_row.label(text=l_mat, icon='MATERIAL')
+                        rm_op = p_row.operator('sourceops.remove_linked_material', text='', icon='X')
+                        rm_op.material_name = l_mat
 
         elif model and sourceops.panel == 'SEQUENCES':
             box = layout.box()
@@ -457,7 +539,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
 
     def draw_texture_settings(self, box, config, item_type):
         col = common.split_column(box)
-        col.prop(config, 'name')
+        col.prop_search(config, 'name', bpy.data, 'materials', text='Material Name')
         
         box.separator()
         box.label(text='VTF Format:', icon='TEXTURE')
@@ -486,6 +568,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             col.prop(config, 'vtf_rclampwidth')
             col.prop(config, 'vtf_rclampheight')
 
+        # --- GENERATE NORMAL MAP (Procedural from base texture) ---
         box.separator()
         box.label(text='Normal Maps (-normal):', icon='MATFLUID')
         col = common.split_column(box)
@@ -514,7 +597,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
         f_col1 = flags_row.column()
         f_col2 = flags_row.column()
         
-        flags =["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
+        flags = ["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
         
         for i, flag in enumerate(flags):
             if i < 10: f_col1.prop(config, f"vtf_flag_{flag}")
@@ -527,14 +610,44 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
         col.prop(config, 'vmt_translucent')
         col.prop(config, 'vmt_alphatest')
         col.prop(config, 'vmt_nocull')
-        col.prop(config, 'vmt_envmap')
+
+        # --- REFLECTIONS ($envmap) ---
+        box.separator()
+        box.label(text='Cubemap Reflection ($envmap):', icon='SHADING_TEXTURE')
+        col = common.split_column(box)
+        col.prop(config, 'vmt_envmap', text='Enable Cubemap ($envmap)')
+        if config.vmt_envmap:
+            col.prop(config, 'vmt_envmaptint')
+            col.prop(config, 'vmt_envmapfresnel')
+            col.prop(config, 'vmt_envmapmask_source')
+
+        # --- PHONG SPECULAR ($phong) ---
+        box.separator()
+        box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
+        col = common.split_column(box)
+        col.prop(config, 'vmt_phong', text='Enable Phong ($phong)')
+        if config.vmt_phong:
+            col.prop(config, 'vmt_phongboost')
+            col.prop(config, 'vmt_phongexponent')
+            col.prop(config, 'vmt_phongfresnelranges')
+            col.prop(config, 'vmt_phongtint')
+            col.prop(config, 'vmt_phongalbedotint')
+            col.prop(config, 'vmt_phongmask_source')
         
         box.separator()
         box.label(text='Custom VMT Editor:', icon='TEXT')
-        row = box.row()
+        row = box.row(align=True)
         row.scale_y = 1.2
         op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT', icon='TEXT')
         op.item_type = item_type
+        op.is_global = False
+        
+        op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
+        op2.item_type = item_type
+        op2.is_global = False
+        
+        row3 = box.row(align=True)
+        row3.prop(config, 'do_not_sort_vmts', text='Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)', icon='PINNED')
 
     def draw_list_buttons(self, layout, item):
         op = layout.operator('sourceops.list_operator', text='', icon='ADD')

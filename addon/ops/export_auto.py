@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 import time
 import concurrent.futures
 from threading import Lock
@@ -26,8 +26,11 @@ class SOURCEOPS_OT_ExportAuto(bpy.types.Operator):
         sub_comp.prop(sourceops, 'use_studiomdlplusplus')
         
         col.separator()
-        col.prop(sourceops, 'auto_use_addon_folder')
-        col.prop(sourceops, 'auto_create_material_folder')
+        sub_folders = col.column()
+        sub_folders.enabled = not sourceops.auto_create_folders_alone
+        sub_folders.prop(sourceops, 'auto_use_addon_folder')
+        sub_folders.prop(sourceops, 'auto_create_material_folder')
+        col.prop(sourceops, 'auto_create_folders_alone')
         col.prop(sourceops, 'auto_export_materials')
         
         sub = col.column()
@@ -87,6 +90,7 @@ class SOURCEOPS_OT_ExportAuto(bpy.types.Operator):
         for source_model in source_models:
             source_model.use_addon_folder = sourceops.auto_use_addon_folder
             source_model.create_material_folder = sourceops.auto_create_material_folder
+            source_model.create_folders_alone = sourceops.auto_create_folders_alone
             source_model.overwrite_vtf = sourceops.auto_overwrite_vtf
             source_model.overwrite_vmt = sourceops.auto_overwrite_vmt
             source_model.use_studiomdlplusplus = sourceops.use_studiomdlplusplus

@@ -15,6 +15,7 @@ from . import triangulate
 from . import backup
 from . import preview_vmt
 from . import spawn_info_player
+from . import material_helpers
 
 classes = (
     open_folder.SOURCEOPS_OT_OpenFolder,
@@ -36,7 +37,12 @@ classes = (
     backup.SOURCEOPS_OT_BackupPreferences,
     backup.SOURCEOPS_OT_RestorePreferences,
     preview_vmt.SOURCEOPS_OT_PreviewVMT,
+    preview_vmt.SOURCEOPS_OT_ResetVMT,
     spawn_info_player.SOURCEOPS_OT_SpawnInfoPlayer,
+    material_helpers.SOURCEOPS_OT_RemoveLinkedMaterial,
+    material_helpers.SOURCEOPS_OT_AutoDetectNormalMap,
+    material_helpers.SOURCEOPS_OT_ClearNormalMap,
+    material_helpers.SOURCEOPS_OT_NormalMapPopup,
 )
 
 def register():

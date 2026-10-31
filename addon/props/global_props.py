@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from . model_props import SOURCEOPS_ModelProps
 from . map_props import SOURCEOPS_MapProps
 from . surface_props import SOURCEOPS_SurfaceProps
@@ -51,6 +51,7 @@ class SOURCEOPS_GlobalProps(bpy.types.PropertyGroup):
     
     auto_use_addon_folder: bpy.props.BoolProperty(name='Create Model Folder Name', description='Create a folder with the Model Name inside your Game Models path and sort files correctly', default=True)
     auto_create_material_folder: bpy.props.BoolProperty(name='Create Material Folder', description='Put exported textures inside a root "materials" folder. If unchecked, exports directly to your Models path alongside your meshes.', default=True)
+    auto_create_folders_alone: bpy.props.BoolProperty(name='Create Model+Material Folder Alone No Model Name', description='Export directly into "models" and "materials" folders without creating a parent folder named after the model', default=False)
     auto_export_materials: bpy.props.BoolProperty(name='Export Materials (VTF/VMT)', description='Automatically extract, format, and generate VTF/VMT files using VTFcmd', default=True)
     auto_overwrite_vtf: bpy.props.BoolProperty(name='Overwrite VTF', description='If enabled, existing VTF files will be overwritten.', default=True)
     auto_overwrite_vmt: bpy.props.BoolProperty(name='Overwrite VMT', description='If enabled, existing VMT files will be overwritten.', default=True)
