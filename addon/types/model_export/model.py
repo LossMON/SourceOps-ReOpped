@@ -10,9 +10,10 @@ from math import degrees
 from shutil import move
 from pathlib import Path
 from traceback import print_exc
-from ... utils import common
-from . smd import SMD
-from . fbx import export_fbx
+
+from ...utils import common
+from .smd import SMD
+from .fbx import export_fbx
 
 
 class Model:
@@ -20,11 +21,11 @@ class Model:
         self.prefs = common.get_prefs(bpy.context)
         self.wine = Path(self.prefs.wine)
         
-        # Globally sync the Addon Folder and Thread settings so all buttons know about them!
         sourceops = common.get_globals(bpy.context)
         if sourceops:
             self.use_addon_folder = getattr(sourceops, 'auto_use_addon_folder', True)
             self.create_material_folder = getattr(sourceops, 'auto_create_material_folder', True)
+            self.create_folders_alone = getattr(sourceops, 'auto_create_folders_alone', False)
             self.overwrite_vtf = getattr(sourceops, 'auto_overwrite_vtf', True)
             self.overwrite_vmt = getattr(sourceops, 'auto_overwrite_vmt', True)
             self.max_threads = getattr(sourceops, 'auto_max_threads', 6)
@@ -32,27 +33,31 @@ class Model:
         else:
             self.use_addon_folder = False
             self.create_material_folder = True
+            self.create_folders_alone = False
             self.overwrite_vtf = True
             self.overwrite_vmt = True
             self.max_threads = 6
             self.use_studiomdlplusplus = False
         
-        # SAVE THE MODEL PROPERTIES SO WE CAN READ THE GLOBAL SETTINGS!
         self.model_props = model
 
         self.game = Path(game.game)
         self.bin = Path(game.bin)
         
         self.model_folder_items = getattr(model, 'model_folder_items', None)
-        mod_subfolder = self.model_folder_items[0].name.replace('\\', '/').strip('/') if (self.model_folder_items and len(self.model_folder_items) > 0) else ''
+        self.mod_raw = self.model_folder_items[0].name.replace('\\', '/').strip('/') if (self.model_folder_items and len(self.model_folder_items) > 0) else ''
         
         base_name = Path(model.name).with_suffix('').as_posix()
-        if mod_subfolder:
-            self.name = f"{mod_subfolder}/{base_name}"
+        self.stem = common.clean_filename(Path(base_name).stem)
+        
+        self.mod_qc_path = self.mod_raw
+        while self.mod_qc_path.lower().startswith('materials/'):
+            self.mod_qc_path = self.mod_qc_path[7:]
+            
+        if self.mod_qc_path:
+            self.name = f"{self.mod_qc_path}/{base_name}"
         else:
             self.name = base_name
-            
-        self.stem = common.clean_filename(Path(base_name).stem)
 
         if model.static and model.static_prop_combine:
             self.modelsrc = self.game.parent.parent.joinpath('content', self.game.name, 'models')
@@ -63,14 +68,9 @@ class Model:
         self.mapsrc = Path(game.mapsrc)
         self.mesh_type = game.mesh_type
 
-        if model.static and model.static_prop_combine:
-            directory = self.modelsrc.joinpath(self.name).parent
-        else:
-            directory = self.modelsrc.joinpath(self.name)
-            
+        directory = self.modelsrc.joinpath(self.stem)
         self.directory = common.verify_folder(directory)
 
-        # --- COMPILER PRIORITY LOGIC ---
         studiomdl = self.bin.joinpath('studiomdl.exe')
         quickmdl = self.bin.joinpath('quickmdl.exe')
         studiomdlplusplus = self.bin.joinpath('studiomdlplusplus.exe')
@@ -79,15 +79,11 @@ class Model:
             if studiomdlplusplus.is_file():
                 self.studiomdl = studiomdlplusplus
             else:
-                print(f"[SourceOps WARNING] 'Use StudioMDL++' is checked, but studiomdlplusplus.exe was not found in {self.bin}! Falling back to default.")
                 self.studiomdl = quickmdl if quickmdl.is_file() else studiomdl
         else:
             self.studiomdl = quickmdl if quickmdl.is_file() else studiomdl
 
-        # --- CLASSIC HLMV LOGIC ---
         self.hlmv = self.bin.joinpath('hlmv.exe')
-        
-        # --- NEW HLMV++ LOGIC ---
         self.hlmvplusplus_dir = Path(game.hlmvplusplus) if getattr(game, 'hlmvplusplus', '') else self.bin
         self.hlmvplusplus_exe = self.hlmvplusplus_dir.joinpath('hlmvplusplus.exe')
 
@@ -138,9 +134,6 @@ class Model:
         self.rotation = model.rotation
         self.scale = model.scale
 
-    # -------------------------------------------------------------
-    # VTF/VMT Generation Utilities
-    # -------------------------------------------------------------
     def _linear_to_srgb(self, c):
         if c < 0.0031308: 
             return c * 12.92
@@ -148,7 +141,6 @@ class Model:
             return 1.055 * (c ** (1.0 / 2.4)) - 0.055
 
     def _write_solid_tga(self, filepath, color, alpha_val):
-        """Writes a perfect raw TGA file using Python to completely bypass Blender's color management bugs"""
         r = self._linear_to_srgb(color[0])
         g = self._linear_to_srgb(color[1])
         b = self._linear_to_srgb(color[2])
@@ -198,7 +190,6 @@ class Model:
             if rough_socket and not rough_socket.is_linked:
                 roughness_val = float(rough_socket.default_value)
 
-        # HARD SAFETY NET: If the material is set to 'OPAQUE', ignore alpha!
         if hasattr(mat, 'blend_method') and mat.blend_method == 'OPAQUE':
             alpha_val = 1.0
             is_alpha_linked = False
@@ -223,7 +214,6 @@ class Model:
         return min(power, max_size)
 
     def _prepare_image_for_export(self, image, max_size=4096, alpha_val=1.0):
-        """Resizes the image and mathematically bakes the Blender Alpha slider value directly into the image's pixels!"""
         width, height = image.size
         new_width = self._get_nearest_power_of_two(width, max_size)
         new_height = self._get_nearest_power_of_two(height, max_size)
@@ -244,7 +234,6 @@ class Model:
                 import numpy as np
                 pixels = np.empty(new_width * new_height * 4, dtype=np.float32)
                 new_img.pixels.foreach_get(pixels)
-                # Multiply the 4th channel (Alpha) of every pixel by the slider value
                 pixels[3::4] *= alpha_val
                 new_img.pixels.foreach_set(pixels)
             except ImportError:
@@ -253,7 +242,7 @@ class Model:
                     pixels[i] *= alpha_val
                 new_img.pixels = pixels
                 
-        new_img.update() # Forces Blender to commit the pixel changes before saving!
+        new_img.update()
         return new_img, True
 
     def _save_temp_texture(self, image, output_dir, file_name):
@@ -275,15 +264,12 @@ class Model:
         return temp_path
     
     def _generate_normal_map_image(self, image, scale=2.0, wrap=False):
-        """Converts a diffuse/heightmap image to a DirectX format normal map (Y-Down) using python"""
         width, height = image.size
-        
         try:
             import numpy as np
             pixels = np.empty(width * height * 4, dtype=np.float32)
             image.pixels.foreach_get(pixels)
             pixels = pixels.reshape((height, width, 4))
-            
             lum = np.mean(pixels[:, :, :3], axis=2)
             
             if wrap:
@@ -298,14 +284,11 @@ class Model:
                 
             dx *= scale * 0.5
             dy *= scale * 0.5
-            
-            # Calculate DirectX Normals (-Y Down)
             nx = -dx
             ny = -dy
             nz = np.ones_like(lum)
             
             length = np.sqrt(nx**2 + ny**2 + nz**2)
-            
             normal_pixels = np.empty((height, width, 4), dtype=np.float32)
             normal_pixels[:, :, 0] = nx / length * 0.5 + 0.5
             normal_pixels[:, :, 1] = ny / length * 0.5 + 0.5
@@ -314,16 +297,51 @@ class Model:
             
             flat_pixels = normal_pixels.flatten()
         except ImportError:
-            print("[SourceOps WARNING] numpy not found! Outputting flat normal map.")
             flat_pixels = [0.5, 0.5, 1.0, 1.0] * (width * height)
 
         new_img = bpy.data.images.new(name=f"{image.name}_normal_temp", width=width, height=height, alpha=False)
         new_img.pixels.foreach_set(flat_pixels)
         new_img.update()
         return new_img
+
+    def _process_assigned_normal(self, image, config):
+        scale = getattr(config, "vtf_nscale", 2.0)
+        wrap = getattr(config, "vtf_nwrap", False)
+        width, height = image.size
+
+        try:
+            import numpy as np
+            pixels = np.empty(width * height * 4, dtype=np.float32)
+            image.pixels.foreach_get(pixels)
+            pixels = pixels.reshape((height, width, 4))
+
+            mean_r = np.mean(pixels[:, :, 0])
+            mean_g = np.mean(pixels[:, :, 1])
+            mean_b = np.mean(pixels[:, :, 2])
+            is_tangent_normal = (mean_b > 0.55 and 0.25 < mean_r < 0.75 and 0.25 < mean_g < 0.75)
+
+            if is_tangent_normal:
+                if abs(scale - 1.0) > 0.001:
+                    nx = (pixels[:, :, 0] * 2.0 - 1.0) * scale
+                    ny = (pixels[:, :, 1] * 2.0 - 1.0) * scale
+                    nz = (pixels[:, :, 2] * 2.0 - 1.0)
+                    length = np.sqrt(nx**2 + ny**2 + nz**2)
+                    length[length == 0] = 1.0
+                    pixels[:, :, 0] = nx / length * 0.5 + 0.5
+                    pixels[:, :, 1] = ny / length * 0.5 + 0.5
+                    pixels[:, :, 2] = nz / length * 0.5 + 0.5
+
+                flat_pixels = pixels.flatten()
+                new_img = bpy.data.images.new(name=f"{image.name}_norm_proc", width=width, height=height, alpha=False)
+                new_img.pixels.foreach_set(flat_pixels)
+                new_img.update()
+                return new_img, True
+            else:
+                return self._generate_normal_map_image(image, scale=scale, wrap=wrap), True
+        except Exception:
+            return image.copy(), True
         
     def _convert_to_vtf(self, tga_path, vtf_path, config, is_normal):
-        # ATTEMPT NATIVE PYVTFLIB (MareTF)
         try:
             from ...PyVTFlib import ops as pyvtf_ops, VTFConvertOptions, IMAGE_FORMAT, VTF_FLAG, VTFResizeOptions, RESIZE_METHOD, RESIZE_FILTER, MODE, VERSION
             
@@ -336,7 +354,7 @@ class Model:
             flag_mapping = {
                 "POINTSAMPLE": "POINT_SAMPLE", "TRILINEAR": "TRILINEAR", "CLAMPS": "CLAMP_S",
                 "CLAMPT": "CLAMP_T", "ANISOTROPIC": "ANISOTROPIC", "NORMAL": "NORMAL",
-                "NOLOD": "NO_LOD", "PROCEDURAL": "PROCEDURAL", "RENDERTARGET": "RENDERTARGET",
+                "NOLOD": "NO_LOD", "MINMIP": "LOAD_SMALL_MIPS", "PROCEDURAL": "PROCEDURAL", "RENDERTARGET": "RENDERTARGET",
                 "DEPTHRENDERTARGET": "DEPTH_RENDERTARGET", "NODEBUGOVERRIDE": "NO_DEBUG_OVERRIDE",
                 "SINGLECOPY": "SINGLE_COPY", "NODEPTHBUFFER": "NO_DEPTH_BUFFER", "CLAMPU": "CLAMP_U",
                 "VERTEXTEXTURE": "VERTEX_TEXTURE", "SSBUMP": "SSBUMP", "BORDER": "BORDER",
@@ -361,7 +379,6 @@ class Model:
                     method=r_method
                 )
 
-            # Ensure NORMAL flag is set when dealing with the normal map specifically
             if is_normal and VTF_FLAG.NORMAL not in vtf_flags:
                 vtf_flags.append(VTF_FLAG.NORMAL)
                     
@@ -370,7 +387,7 @@ class Model:
             except KeyError: 
                 filter_enum = RESIZE_FILTER.DEFAULT
                 
-            disable_mips = getattr(config, "vtf_nomipmaps", False)
+            disable_mips = getattr(config, "vtf_nomipmaps", False) or getattr(config, "vtf_flag_NOMIP", False)
             
             options = VTFConvertOptions(
                 input_path=Path(tga_path),
@@ -380,20 +397,16 @@ class Model:
                 vtf_flags=vtf_flags,
                 filter=filter_enum,
                 resize=resize_options,
-                normal=None, # Already baked inside python! Avoid double scaling/inversions
+                normal=None,
                 disable_mips=disable_mips,
-                version=VERSION.V7_2
+                version=VERSION.V7_4
             )
             vtf_ops = pyvtf_ops()
-            
-            print(f"\n[SourceOps] >>> Executing MareTF via PyVTFlib natively for '{os.path.basename(tga_path)}'...")
             vtf_ops.convert(options)
             
             if os.path.exists(vtf_path):
-                print(f"[SourceOps] -> MareTF Conversion Successful for {os.path.basename(vtf_path)}")
                 return True
             else:
-                print(f"[SourceOps ERROR] MareTF failed to generate {vtf_path}")
                 return False
                 
         except Exception as e:
@@ -401,31 +414,25 @@ class Model:
             return False
 
     def _process_vtf_tasks(self, tga_path, vtf_path, tga_normal_path, vtf_normal_path, config, generate_normal, addon_dir, mat_clean):
-        # 1. Base texture
         if tga_path:
             success_base = self._convert_to_vtf(tga_path, vtf_path, config, False)
             if success_base and addon_dir:
                 try: 
                     shutil.copy2(vtf_path, os.path.join(addon_dir, f"{mat_clean}.vtf"))
                 except Exception as e: 
-                    print(f"[SourceOps] Failed to copy VTF to Addon folder: {e}")
-            
-            # Cleanup TGA safely
+                    pass
             try: 
                 os.remove(tga_path)
             except: 
                 pass
                 
-        # 2. Normal texture
         if generate_normal and tga_normal_path:
             success_norm = self._convert_to_vtf(tga_normal_path, vtf_normal_path, config, True)
             if success_norm and addon_dir:
                 try: 
                     shutil.copy2(vtf_normal_path, os.path.join(addon_dir, f"{mat_clean}_normalmap.vtf"))
                 except Exception as e: 
-                    print(f"[SourceOps] Failed to copy Normal VTF to Addon folder: {e}")
-            
-            # Cleanup Normal TGA safely
+                    pass
             try: 
                 os.remove(tga_normal_path)
             except: 
@@ -444,35 +451,37 @@ class Model:
         print(f"[SourceOps] ========================================")
 
         addon_name = self.stem
-        mat_subfolder = self.material_folder_items[0].name.replace('\\', '/').strip('/') if self.material_folder_items else ''
+        mat_raw = self.material_folder_items[0].name.replace('\\', '/').strip('/') if self.material_folder_items else ''
         
-        # --- STRICTLY ONE EXPORT LOCATION BASED ON SETTINGS ---
-        if self.create_material_folder:
+        mat_qc_path = mat_raw
+        while mat_qc_path.lower().startswith('materials/'):
+            mat_qc_path = mat_qc_path[10:]
+            
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+        
+        if getattr(self, 'create_folders_alone', False):
+            target_dir = out_root.joinpath('materials', mat_qc_path)
+        elif self.create_material_folder:
             if use_addon_folder:
-                target_dir = self.models.joinpath(addon_name, 'materials', mat_subfolder)
+                target_dir = out_root.joinpath(addon_name, 'materials', mat_qc_path)
             else:
-                if self.models.name.lower() == 'models':
-                    target_dir = self.models.parent.joinpath('materials', mat_subfolder)
-                else:
-                    target_dir = self.models.joinpath('materials', mat_subfolder)
+                target_dir = out_root.joinpath('materials', mat_qc_path)
         else:
             if use_addon_folder:
-                target_dir = self.models.joinpath(addon_name, 'models', mat_subfolder)
+                target_dir = out_root.joinpath(addon_name, mat_raw)
             else:
-                target_dir = self.models.joinpath(mat_subfolder)
+                target_dir = out_root.joinpath(mat_raw)
                 
         target_dir.mkdir(parents=True, exist_ok=True)
-        # -----------------------------------------------------
-        
-        # IF "CREATE MODEL FOLDER NAME" IS ENABLED, WE DO NOT NEED TO COPY IT ANYWHERE ELSE!
         addon_dir = None
         
         objects = set()
         if self.reference: 
             objects.update(self.get_all_objects(self.reference))
-        for lod_col in [self.lod_1_collection, self.lod_2_collection, self.lod_3_collection, self.lod_4_collection, self.lod_5_collection, self.lod_6_collection]:
-            if lod_col: 
-                objects.update(self.get_all_objects(lod_col))
+        
         if self.bodygroups:
             for bg in self.bodygroups.children:
                 for col in bg.children: 
@@ -505,184 +514,247 @@ class Model:
                     vtf_path = target_dir.joinpath(f"{mat_clean}.vtf")
                     vtf_normal_path = target_dir.joinpath(f"{mat_clean}_normalmap.vtf")
                     
-                    # Look for explicit UI settings for this specific material in the Skin/Material Lists
                     mat_config = next((m for m in self.material_items if m.name == mat_clean), None)
-                    skin_config = next((s for s in self.skin_items if s.name == mat_clean), None)
-                    config = skin_config if skin_config else (mat_config if mat_config else self.model_props)
+                    config = mat_config if mat_config else self.model_props
                     
-                    if skin_config:
-                        print(f"[SourceOps] Found Skin override settings for '{mat_clean}'.")
-                    elif mat_config:
-                        print(f"[SourceOps] Found Material override settings for '{mat_clean}'.")
+                    assigned_norm = getattr(config, "normal_map", "").strip()
+                    generate_normal = getattr(config, "vtf_normal_map", False)
+                    has_normal = generate_normal or bool(assigned_norm)
+
+                    used_global_text = False
+                    existing_text = None
+                    
+                    if mat_config:
+                        text_name = f"VMT_{mat_clean}.vmt"
+                        existing_text = bpy.data.texts.get(text_name)
                     else:
-                        print(f"[SourceOps] Using Global Model default settings for '{mat_clean}'.")
+                        global_text_name = f"VMT_GLOBAL_{self.stem}.vmt"
+                        existing_text = bpy.data.texts.get(global_text_name)
+                        if not existing_text:
+                            existing_text = bpy.data.texts.get("VMT_GLOBAL_SETTINGS.vmt")
+                        if existing_text:
+                            used_global_text = True
                     
                     img_or_color, is_gen, alpha_val, roughness_val, is_alpha_linked = self._get_material_texture_data(mat)
                     
-                    # --- VMT OVERWRITE LOGIC ---
                     vmt_needs_update = self.overwrite_vmt or not vmt_path.is_file()
                     
                     if vmt_needs_update:
-                        
-                        # --- SMART MERGER: Extract User's Custom Lines & Edits ---
-                        text_name = f"VMT_{mat_clean}.vmt"
-                        custom_text = bpy.data.texts.get(text_name)
-                        custom_lines = []
-                        user_overrides = {}
-                        controlled_keys = ["$basetexture", "$bumpmap", "$surfaceprop", "$model", "$translucent", "$alphatest", "$nocull", "$envmap", "$normalmapalphaenvmapmask", "$envmaptint", "$reflectivity", "$envmapblur"]
-                        
-                        # First try Blender Text Editor, then fall back to physical VMT file
-                        lines_to_parse = []
-                        if custom_text:
-                            lines_to_parse = [line.body for line in custom_text.lines]
-                        elif vmt_path.is_file():
-                            try:
-                                with open(vmt_path, 'r') as f: 
-                                    lines_to_parse = f.readlines()
-                            except: 
-                                pass
-                            
-                        for raw_line in lines_to_parse:
-                            stripped = raw_line.strip()
-                            if stripped == "{" or stripped == "}": 
-                                continue
-                            
-                            clean_shader = stripped.replace('"', '').lower()
-                            if clean_shader in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: 
-                                continue
-                                    
-                            is_controlled = False
-                            if stripped:
-                                first_word = stripped.replace('"', '').split()[0].lower()
-                                if first_word in controlled_keys: 
-                                    user_overrides[first_word] = raw_line.rstrip('\n')
-                                    is_controlled = True
-                                    
-                            if not is_controlled:
-                                custom_lines.append(raw_line.rstrip('\n'))
-                                
-                        while custom_lines and not custom_lines[0].strip(): 
-                            custom_lines.pop(0)
-                        while custom_lines and not custom_lines[-1].strip(): 
-                            custom_lines.pop()
-
-                        def get_line(key, default_str):
-                            if key in user_overrides:
-                                val = user_overrides[key]
-                                if not val.startswith(' ') and not val.startswith('\t'):
-                                    return f'    {val}'
-                                return val
-                            return default_str
-
-                        # --- GENERATE VMT FROM UI ---
+                        do_not_sort = getattr(config, "do_not_sort_vmts", False) or getattr(self.model_props, "do_not_sort_vmts", False)
+                        basetexture_path = f"{mat_qc_path}/{mat_clean}" if mat_qc_path else mat_clean
+                        surface_prop = self.surface if hasattr(self, 'surface') else getattr(self.model_props, 'surface', 'default')
                         shader = getattr(config, "vmt_shader", "VertexLitGeneric")
-                        generate_normal = getattr(config, "vtf_normal_map", False)
-                        basetexture_path = f"{mat_subfolder}/{mat_clean}" if mat_subfolder else mat_clean
-
-                        vmt_lines = [
-                            f'"{shader}"',
-                            '{',
-                            get_line("$basetexture", f'    "$basetexture" "{basetexture_path}"'),
-                        ]
                         
-                        if generate_normal: 
-                            vmt_lines.append(get_line("$bumpmap", f'    "$bumpmap" "{basetexture_path}_normalmap"'))
-                        
-                        vmt_lines.append(get_line("$surfaceprop", f'    "$surfaceprop" "{self.surface}"'))
-                        vmt_lines.append(get_line("$model", '    "$model" 1'))
-                        
-                        vmt_trans = getattr(config, "vmt_translucent", False)
-                        vmt_alpha = getattr(config, "vmt_alphatest", False)
-                        
-                        if alpha_val < 0.9995:
-                            vmt_trans = True
-                            vmt_alpha = False
-                            
-                        if vmt_trans: 
-                            vmt_lines.append(get_line("$translucent", '    "$translucent" 1'))
-                        if vmt_alpha: 
-                            vmt_lines.append(get_line("$alphatest", '    "$alphatest" 1'))
-                            
-                        if getattr(config, "vmt_nocull", False): 
-                            vmt_lines.append(get_line("$nocull", '    "$nocull" 1'))
-                        
-                        if getattr(config, "vmt_envmap", False):
-                            if generate_normal: 
-                                vmt_lines.append(get_line("$envmap", f'    "$envmap" "{basetexture_path}_normalmap"'))
-                            else: 
-                                vmt_lines.append(get_line("$envmap", '    "$envmap" "env_cubemap"'))
-                            vmt_lines.append(get_line("$normalmapalphaenvmapmask", '    "$normalmapalphaenvmapmask" 1'))
-                            vmt_lines.append(get_line("$envmaptint", '    "$envmaptint" "[.3 .3 .3]"'))
-                            vmt_lines.append(get_line("$reflectivity", '    "$reflectivity" "[1 1 1]"'))
-                            vmt_lines.append(get_line("$envmapblur", '    "$envmapblur" "1"'))
-                            
-                        # Inject the preserved custom lines
-                        if custom_lines:
-                            vmt_lines.append('')
-                            for cl in custom_lines:
-                                if cl.strip():
-                                    if not cl.startswith(' ') and not cl.startswith('\t'): 
-                                        vmt_lines.append(f'    {cl}')
-                                    else: 
-                                        vmt_lines.append(cl)
-                                else:
-                                    vmt_lines.append('')
+                        # -------------------------------------------------------------
+                        # 1. TRUE MANUAL OVERRIDE (DO NOT SORT VMTS)
+                        # -------------------------------------------------------------
+                        if do_not_sort:
+                            raw_lines = []
+                            if existing_text and len(existing_text.lines) > 0:
+                                raw_lines = [line.body for line in existing_text.lines]
+                            elif vmt_path.is_file():
+                                try:
+                                    with open(vmt_path, 'r') as f:
+                                        lines = f.read().splitlines()
+                                    is_disk_global = False
+                                    for line in reversed(lines):
+                                        if line.strip().startswith("// [SourceOps_State]"):
+                                            state_str_old = line.split("// [SourceOps_State]")[1].strip()
+                                            for pair in state_str_old.split("|"):
+                                                if ":" in pair and pair.split(":")[0] == "is_global":
+                                                    is_disk_global = (pair.split(":")[1] == "1")
+                                            break
+                                    if not used_global_text and is_disk_global:
+                                        lines = []
+                                    raw_lines = [l for l in lines if not l.strip().startswith("// [SourceOps_State]")]
+                                except:
+                                    pass
+                                    
+                            if not raw_lines:
+                                raw_lines = [
+                                    f'"{shader}"',
+                                    '{',
+                                    f'    "$basetexture" "{basetexture_path}"',
+                                    f'    "$surfaceprop" "{surface_prop}"',
+                                    '}'
+                                ]
+                            else:
+                                if used_global_text:
+                                    new_raw = []
+                                    for l in raw_lines:
+                                        if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in l:
+                                            continue
+                                        if "(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)" in l:
+                                            l = l.replace('"(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)"', f'"{basetexture_path}"')
+                                            l = l.replace("(DO NOT CHANGE THIS - APPLIES IT GLOBALLY)", basetexture_path)
+                                        new_raw.append(l)
+                                    raw_lines = new_raw
+                                    
+                            final_lines = raw_lines
+                            raw_content = "\n".join(final_lines)
+                            if not raw_content.endswith('\n'):
+                                raw_content += '\n'
                                 
-                        vmt_lines.append('}\n')
-                        vmt_content = "\n".join(vmt_lines)
-                        
-                        try:
-                            with open(vmt_path, 'w') as f: 
-                                f.write(vmt_content)
-                            if addon_dir:
-                                shutil.copy2(vmt_path, addon_dir.joinpath(f"{mat_clean}.vmt"))
-                            print(f"[SourceOps] Successfully wrote VMT: {vmt_path.name}")
-                        except Exception as e: 
-                            print(f"[SourceOps ERROR] Failed to write VMT: {e}")
-                    else:
-                        print(f"[SourceOps] VMT file exists and Overwrite VMT is OFF. Skipping VMT for {mat_clean}.")
+                            try:
+                                with open(vmt_path, 'w') as f:
+                                    f.write(raw_content)
+                            except Exception as e:
+                                print(f"[SourceOps ERROR] Could not write VMT: {e}")
 
-                    # --- VTF OVERWRITE LOGIC ---
+                        # -------------------------------------------------------------
+                        # 2. NORMAL EXPORT (ALWAYS USES LIVE UI SETTINGS & COLORS)
+                        # -------------------------------------------------------------
+                        else:
+                            lines_to_parse = []
+                            if existing_text and len(existing_text.lines) > 0:
+                                lines_to_parse = [line.body for line in existing_text.lines]
+                            elif vmt_path.is_file():
+                                try:
+                                    with open(vmt_path, 'r') as f:
+                                        lines_to_parse = f.read().splitlines()
+                                except:
+                                    pass
+                                    
+                            lines_to_parse = [l for l in lines_to_parse if not l.strip().startswith("// [SourceOps_State]")]
+                            custom_lines = []
+                            controlled_keys = [
+                                "$basetexture", "$bumpmap", "$surfaceprop", "$model", "$translucent", "$alphatest", "$nocull",
+                                "$envmap", "$envmaptint", "$envmapfresnel", "$normalmapalphaenvmapmask", "$basealphaenvmapmask",
+                                "$phong", "$phongboost", "$phongexponent", "$phongtint", "$phongalbedotint",
+                                "$phongfresnelranges", "$basemapalphaphongmask", "$reflectivity", "$envmapblur"
+                            ]
+
+                            if lines_to_parse:
+                                for raw_line in lines_to_parse:
+                                    stripped = raw_line.strip()
+                                    if not stripped: continue
+                                    if "DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY" in stripped: continue
+                                    lower_line = stripped.lower().replace('"', '')
+                                    if lower_line in ["vertexlitgeneric", "unlitgeneric", "lightmappedgeneric"]: continue
+                                    if lower_line in ["vertexlitgeneric {", "unlitgeneric {", "lightmappedgeneric {"]: continue
+                                    if stripped in ("{", "}"): continue
+
+                                    is_controlled = any(stripped.lower().startswith(c_key) or stripped.lower().startswith(f'"{c_key}"') for c_key in controlled_keys)
+                                    if not is_controlled:
+                                        custom_lines.append(raw_line.rstrip('\n'))
+
+                            vmt_lines = [f'"{shader}"', '{']
+                            if used_global_text:
+                                vmt_lines.append('    // (DO NOT CHANGE THIS - THE $basetexture APPLIES GLOBALLY, WILL BE REPLACED PER-MATERIAL ON EXPORT)')
+
+                            vmt_lines.append(f'    "$basetexture" "{basetexture_path}"')
+                            
+                            bump_active = (has_normal or getattr(config, "vmt_phong", False))
+                            if has_normal:
+                                bump_val = f"{basetexture_path}_normalmap"
+                            else:
+                                bump_val = "dev/flat_normal"
+                                
+                            if bump_active:
+                                vmt_lines.append(f'    "$bumpmap" "{bump_val}"')
+                                
+                            vmt_lines.append(f'    "$surfaceprop" "{surface_prop}"')
+                            vmt_lines.append('    "$model" 1')
+
+                            if getattr(config, "vmt_translucent", False): vmt_lines.append('    "$translucent" 1')
+                            if getattr(config, "vmt_alphatest", False): vmt_lines.append('    "$alphatest" 1')
+                            if getattr(config, "vmt_nocull", False): vmt_lines.append('    "$nocull" 1')
+
+                            if getattr(config, "vmt_phong", False):
+                                vmt_lines.append('    "$phong" "1"')
+                                vmt_lines.append(f'    "$phongboost" "{getattr(config, "vmt_phongboost", 1.0):.2f}"')
+                                vmt_lines.append(f'    "$phongexponent" "{getattr(config, "vmt_phongexponent", 25)}"')
+                                vmt_lines.append(f'    "$phongfresnelranges" "{getattr(config, "vmt_phongfresnelranges", "[0.05 0.5 1]")}"')
+                                if getattr(config, "vmt_phongalbedotint", False):
+                                    vmt_lines.append('    "$phongalbedotint" "1"')
+                                else:
+                                    pt = getattr(config, "vmt_phongtint", (1.0, 1.0, 1.0))
+                                    if not (abs(pt[0] - 1.0) < 0.01 and abs(pt[1] - 1.0) < 0.01 and abs(pt[2] - 1.0) < 0.01):
+                                        vmt_lines.append(f'    "$phongtint" "[{pt[0]:.2f} {pt[1]:.2f} {pt[2]:.2f}]"')
+                                if getattr(config, "vmt_phongmask_source", "NORMAL_ALPHA") == "BASE_ALPHA":
+                                    vmt_lines.append('    "$basemapalphaphongmask" "1"')
+
+                            if getattr(config, "vmt_envmap", False):
+                                vmt_lines.append('    "$envmap" "env_cubemap"')
+                                et = getattr(config, "vmt_envmaptint", (0.3, 0.3, 0.3))
+                                vmt_lines.append(f'    "$envmaptint" "[{et[0]:.2f} {et[1]:.2f} {et[2]:.2f}]"')
+                                if getattr(config, "vmt_envmapfresnel", False):
+                                    vmt_lines.append('    "$envmapfresnel" "1"')
+                                mask_src = getattr(config, "vmt_envmapmask_source", "NORMAL_ALPHA")
+                                if mask_src == "NORMAL_ALPHA" and bump_active:
+                                    vmt_lines.append('    "$normalmapalphaenvmapmask" 1')
+                                elif mask_src == "BASE_ALPHA":
+                                    vmt_lines.append('    "$basealphaenvmapmask" 1')
+
+                            if custom_lines:
+                                vmt_lines.append('')
+                                for cl in custom_lines:
+                                    vmt_lines.append(cl)
+
+                            vmt_lines.append('}')
+                            vmt_content_final = "\n".join(vmt_lines) + "\n"
+                            
+                            try:
+                                with open(vmt_path, 'w') as f: 
+                                    f.write(vmt_content_final)
+                            except Exception as e: 
+                                print(f"[SourceOps ERROR] Failed to write VMT: {e}")
+
                     vtf_needs_update = self.overwrite_vtf or not vtf_path.is_file()
-                    generate_normal = getattr(config, "vtf_normal_map", False)
-                    
-                    if generate_normal and not vtf_normal_path.is_file():
+                    if has_normal and not vtf_normal_path.is_file():
                         vtf_needs_update = True
                         
                     if not vtf_needs_update:
-                        print(f"[SourceOps] VTF file(s) exist and Overwrite VTF is OFF. Skipping VTF conversion for {mat_clean}.")
                         continue 
 
-                    # --- EXECUTE PROCESSING TASKS ---
                     if img_or_color:
                         tga_path = None
                         tga_normal_path = None
                         
                         if is_gen:
-                            print("[SourceOps] Creating Solid Color Binary TGA.")
                             tga_path = str(target_dir.joinpath(f"{mat_clean}.tga"))
                             if not self._write_solid_tga(tga_path, img_or_color, alpha_val):
                                 tga_path = None
-                                print("[SourceOps ERROR] Failed to generate Solid TGA.")
                                 
-                            if generate_normal:
+                            if has_normal:
                                 tga_normal_path = str(target_dir.joinpath(f"{mat_clean}_normalmap.tga"))
                                 self._write_solid_tga(tga_normal_path, [0.5, 0.5, 1.0], 1.0)
                         else:
                             bake_alpha = alpha_val if not is_gen else 1.0
-                            print(f"[SourceOps] Saving Image Texture TGA (Alpha Multiplier: {bake_alpha}).")
                             final_img, was_modified = self._prepare_image_for_export(img_or_color, max_size=4096, alpha_val=bake_alpha)
                             
                             tga_path = self._save_temp_texture(final_img, str(target_dir), mat_clean)
                             
+                            assigned_norm = getattr(config, "normal_map", "").strip()
                             if generate_normal:
-                                print(f"[SourceOps] Generating Normal Map from Diffuse Image...")
                                 nmap_img = self._generate_normal_map_image(final_img, scale=getattr(config, "vtf_nscale", 2.0), wrap=getattr(config, "vtf_nwrap", False))
                                 if nmap_img:
                                     tga_normal_path = self._save_temp_texture(nmap_img, str(target_dir), f"{mat_clean}_normalmap")
                                     self._cleanup_image(nmap_img)
+                            elif assigned_norm:
+                                norm_img = bpy.data.images.get(assigned_norm)
+                                if not norm_img:
+                                    m_found = bpy.data.materials.get(assigned_norm)
+                                    if m_found:
+                                        norm_img, _, _, _, _ = self._get_material_texture_data(m_found)
+                                if not norm_img:
+                                    for im in bpy.data.images:
+                                        if Path(im.name).stem == Path(assigned_norm).stem:
+                                            norm_img = im
+                                            break
+                                if norm_img:
+                                    proc_img, was_proc = self._process_assigned_normal(norm_img, config)
+                                    final_norm_img, was_norm_modified = self._prepare_image_for_export(proc_img, max_size=4096)
+                                    tga_normal_path = self._save_temp_texture(final_norm_img, str(target_dir), f"{mat_clean}_normalmap")
+                                    if was_norm_modified:
+                                        self._cleanup_image(final_norm_img)
+                                    if was_proc:
+                                        self._cleanup_image(proc_img)
                                 else:
-                                    print("[SourceOps ERROR] Failed to generate Normal Map Image.")
+                                    nmap_img = self._generate_normal_map_image(final_img, scale=getattr(config, "vtf_nscale", 2.0), wrap=getattr(config, "vtf_nwrap", False))
+                                    if nmap_img:
+                                        tga_normal_path = self._save_temp_texture(nmap_img, str(target_dir), f"{mat_clean}_normalmap")
+                                        self._cleanup_image(nmap_img)
 
                             if was_modified: 
                                 self._cleanup_image(final_img)
@@ -692,19 +764,14 @@ class Model:
                                 self._process_vtf_tasks, 
                                 tga_path, str(vtf_path), 
                                 tga_normal_path, str(vtf_normal_path), 
-                                config, generate_normal, 
+                                config, has_normal, 
                                 str(addon_dir) if addon_dir else None, mat_clean
                             )
-                        else:
-                            print("[SourceOps ERROR] Failed to prepare TGAs for VTF conversion.")
 
         print(f"[SourceOps] ========================================")
         print(f"[SourceOps] COMPLETED MATERIAL EXPORT FOR: {self.name}")
         print(f"[SourceOps] ========================================\n")
 
-    # -------------------------------------------------------------
-    # Standard SourceOps Operations
-    # -------------------------------------------------------------
     def export_meshes(self):
         print(f"\n[SourceOps] Starting Mesh Export...")
         self.ensure_modelsrc_folder()
@@ -767,55 +834,52 @@ class Model:
         except:
             self.report(f'Failed to export: {path}', exception=True)
         else:
-            start = time.time()
             smd = SMD(self.prepend_armature, self.ignore_transforms)
             smd.from_blender(armature, objects, action)
             smd_file.write(smd.to_string())
             smd_file.close()
-            print(f'[SourceOps] Exported: {path} in {round(time.time() - start, 1)} seconds')
 
     def export_fbx(self, armature, objects, path):
-        start = time.time()
         try:
             export_fbx(path, armature, objects, self.prepend_armature, self.ignore_transforms)
         except:
             self.report(f'Failed to export: {path}', exception=True)
-        else:
-            print(f'[SourceOps] Exported: {path} in {round(time.time() - start, 1)} seconds')
 
     def get_all_objects(self, collection):
-        return common.remove_duplicates(collection.all_objects) if collection else []
+        if not collection: return []
+        valid_objects = [obj for obj in collection.all_objects if obj.name in bpy.context.view_layer.objects]
+        return common.remove_duplicates(valid_objects)
 
     def get_body_path(self, collection):
         name = common.clean_filename(collection.name)
         return self.directory.joinpath(f'{name}.{self.mesh_type}')
 
     def generate_qc(self):
-        print(f"\n[SourceOps] Starting QC Generation...")
         if not self.reference and not self.stacking:
             return self.report(f'Unable to generate QC for: {self.name} (reference and stacking both not set)')
 
         if not self.armature and not self.static:
             self.static = True
-            print(f'[SourceOps] Armature not set for {self.name}, using static')
 
         self.ensure_modelsrc_folder()
         path = self.directory.joinpath(f'{self.stem}.qc')
 
         try:
             qc = path.open('w')
-            print(f'[SourceOps] Generating QC file: {path}')
         except:
             return self.report(f'Failed to open: {path}', exception=True)
 
-        qc.write(f'$modelname "{self.name}"\n\n')
+        qc.write(f'$modelname "{self.name}.mdl"\n\n')
 
-        # FIX: Ensure paths always have a trailing slash for proper engine resolution
         if not self.material_folder_items:
             qc.write('$cdmaterials ""\n\n')
         else:
             for material_folder in self.material_folder_items:
                 folder_name = material_folder.name.replace('\\', '/').strip('/')
+                
+                while folder_name.lower().startswith('materials/'):
+                    folder_name = folder_name[10:]
+                    
                 if folder_name:
                     qc.write(f'$cdmaterials "{folder_name}/"\n')
                 else:
@@ -875,7 +939,7 @@ class Model:
         if self.reference and has_lods:
             qc.write('\n// --- LOD SECTION ---\n')
             for dist, lod_col in lods:
-                if lod_col:
+                if lod_col and len(self.get_all_objects(lod_col)) > 0:
                     qc.write(f'$lod {dist}\n')
                     qc.write('{\n')
                     ref_name = common.clean_filename(self.reference.name)
@@ -904,13 +968,17 @@ class Model:
                 qc.write(f'\n$bodygroup "{bodygroup_name}" {{\n')
                 for collection in bodygroup.children:
                     name = common.clean_filename(collection.name)
-                    qc.write(f'    studio "{name}.{self.mesh_type}"\n')
+                    if len(self.get_all_objects(collection)) > 0:
+                        qc.write(f'    studio "{name}.{self.mesh_type}"\n')
+                    else:
+                        qc.write(f'    blank\n')
                 qc.write('}\n')
 
         if self.stacking:
             for collection in self.stacking.children:
-                name = common.clean_filename(collection.name)
-                qc.write(f'\n$model "{name}" "{name}.{self.mesh_type}"\n')
+                if len(self.get_all_objects(collection)) > 0:
+                    name = common.clean_filename(collection.name)
+                    qc.write(f'\n$model "{name}" "{name}.{self.mesh_type}"\n')
 
         if not self.sequence_items:
             qc.write('\n$sequence "idle" "anims/idle.SMD"\n')
@@ -978,15 +1046,10 @@ class Model:
             qc.write('}\n')
         
         qc.close()
-        print(f"[SourceOps] QC Generation Completed.\n")
 
     def compile_qc(self):
         qc = self.directory.joinpath(f'{self.stem}.qc')
         if qc.is_file():
-            print(f'\n[SourceOps] ========================================')
-            print(f'[SourceOps] COMPILING QC: {qc.name}')
-            print(f'[SourceOps] ========================================')
-            
             self.ensure_models_folder()
             self.remove_models_old()
 
@@ -1000,18 +1063,13 @@ class Model:
                         '-game', str(self.game.relative_to(cwd)), str(qc.relative_to(cwd))]
             else:
                 if is_plusplus:
-                    # ONLY FORCE THE SPECIAL ENVIRONMENT FOR STUDIOMDL++
                     cwd = str(self.bin)
                     env_vars = os.environ.copy()
                     env_vars['VPROJECT'] = str(self.game)
                 else:
-                    # STRICTLY RESTORE THE ORIGINAL, NATIVE CONTEXT FOR DEFAULT STUDIOMDL TO PREVENT -1 CRASHES
                     cwd = None
                     
                 args = [str(self.studiomdl), '-nop4', '-fullcollide', '-game', str(self.game), str(qc)]
-
-            print(f'[SourceOps] Command: {" ".join(args)}')
-            print(f'[SourceOps] Working Directory: {cwd if cwd else "Blender Default"}\n')
 
             try:
                 if env_vars:
@@ -1020,7 +1078,6 @@ class Model:
                     pipe = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=cwd, universal_newlines=True)
 
                 log_output = []
-                # Stream directly to Blender Console in real-time
                 for line in pipe.stdout:
                     print(line, end='')
                     log_output.append(line)
@@ -1028,28 +1085,21 @@ class Model:
                 pipe.wait()
                 code = pipe.returncode
                 
-                # Write log file manually
                 log_file = self.directory.joinpath(f'{self.stem}.log')
                 with open(log_file, 'w', encoding='utf-8') as f:
                     f.writelines(log_output)
-                    
-                print(f'\n[SourceOps] Compiler finished with return code: {code}')
                 
                 if code == 3221225785 or code == -1073741511:
                     error_msg = f"CRITICAL DLL CRASH: {self.studiomdl.name} crashed instantly! It is incompatible with the .dll files in your bin folder."
-                    print(f"\n[SourceOps ERROR] {error_msg}")
                     return error_msg
                 elif code == 3221225781 or code == -1073741515:
                     error_msg = f"CRITICAL DLL CRASH: {self.studiomdl.name} crashed instantly! It is missing required .dll files."
-                    print(f"\n[SourceOps ERROR] {error_msg}")
                     return error_msg
                 elif code == 4294967295 or code == -1:
                     error_msg = f"FATAL ERROR (-1): {self.studiomdl.name} crashed. This usually means your Game Path or Bin Path in the Games Panel is invalid."
-                    print(f"\n[SourceOps ERROR] {error_msg}")
                     return error_msg
 
             except Exception as e:
-                print(f"[SourceOps ERROR] Exception running compiler: {e}")
                 return f"Compiler exception: {e}"
 
             if code == 0:
@@ -1061,7 +1111,6 @@ class Model:
 
     def open_folder(self):
         try:
-            print(f'[SourceOps] Opening: {self.directory}')
             bpy.ops.wm.path_open(filepath=str(self.directory))
         except:
             return self.report(f'Failed to open: {self.directory}', exception=True)
@@ -1069,8 +1118,15 @@ class Model:
     def view_model(self):
         addon_name = self.stem
         
-        if self.use_addon_folder:
-            model = self.models.joinpath(addon_name, 'models', self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+            
+        if getattr(self, 'create_folders_alone', False):
+            model = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            model = out_root.joinpath(addon_name, 'models', self.name)
         else:
             model = self.models.joinpath(self.name)
             
@@ -1087,7 +1143,6 @@ class Model:
             args = [str(self.hlmv), '-game', str(self.game), str(mdl)]
 
         if dx90.is_file():
-            print(f'[SourceOps] Viewing: {mdl}')
             subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
         else:
             return self.report(f'Failed to view: {mdl}')
@@ -1095,8 +1150,15 @@ class Model:
     def view_model_plusplus(self):
         addon_name = self.stem
         
-        if self.use_addon_folder:
-            model = self.models.joinpath(addon_name, 'models', self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+            
+        if getattr(self, 'create_folders_alone', False):
+            model = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            model = out_root.joinpath(addon_name, 'models', self.name)
         else:
             model = self.models.joinpath(self.name)
             
@@ -1116,7 +1178,6 @@ class Model:
             args = [str(self.hlmvplusplus_exe), '-game', str(self.game), str(mdl)]
 
         if dx90.is_file():
-            print(f'[SourceOps] Viewing in HLMV++: {mdl}')
             subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
         else:
             return self.report(f'Failed to view: {mdl}')
@@ -1125,15 +1186,21 @@ class Model:
         path_src = self.game.joinpath('models', self.name)
         addon_name = self.stem
         
-        if self.use_addon_folder:
-            path_dst = self.models.joinpath(addon_name, 'models', self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+
+        if getattr(self, 'create_folders_alone', False):
+            path_dst = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            path_dst = out_root.joinpath(addon_name, 'models', self.name)
         else:
             path_dst = self.models.joinpath(self.name)
 
         if path_src == path_dst:
             return
 
-        print(f'[SourceOps] Moving compiled files to: {path_dst.parent}')
         common.verify_folder(path_dst.parent)
 
         for suffix in ('.dx90.vtx', '.dx80.vtx', '.sw.vtx', '.vvd', '.mdl', '.phy'):
@@ -1145,12 +1212,11 @@ class Model:
                     try: 
                         dst.unlink()
                     except Exception as e: 
-                        print(f'[SourceOps ERROR] Failed to delete existing {dst}: {e}')
+                        pass
                 try: 
                     move(src, dst)
-                    print(f'[SourceOps] Moved: {dst.name}')
-                except Exception as e:
-                    print(f'[SourceOps ERROR] Failed to move {src} to {dst}: {e}')
+                except Exception as e: 
+                    pass
 
     def ensure_modelsrc_folder(self):
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -1164,19 +1230,41 @@ class Model:
 
     def ensure_models_folder(self):
         addon_name = self.stem
-        path_dst = self.models.joinpath(addon_name, 'models', self.name) if self.use_addon_folder else self.models.joinpath(self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+            
+        if getattr(self, 'create_folders_alone', False):
+            path_dst = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            path_dst = out_root.joinpath(addon_name, 'models', self.name)
+        else:
+            path_dst = self.models.joinpath(self.name)
+            
         path_dst.parent.mkdir(parents=True, exist_ok=True)
 
     def remove_models_old(self):
         addon_name = self.stem
-        path_dst = self.models.joinpath(addon_name, 'models', self.name) if self.use_addon_folder else self.models.joinpath(self.name)
+        if self.models.name.lower() == 'models':
+            out_root = self.models.parent
+        else:
+            out_root = self.models
+            
+        if getattr(self, 'create_folders_alone', False):
+            path_dst = out_root.joinpath('models', self.name)
+        elif self.use_addon_folder:
+            path_dst = out_root.joinpath(addon_name, 'models', self.name)
+        else:
+            path_dst = self.models.joinpath(self.name)
+            
         for suffix in ('.dx90.vtx', '.dx80.vtx', '.sw.vtx', '.vvd', '.mdl', '.phy'):
             path = path_dst.with_suffix(suffix)
             if path.is_file(): 
                 try: 
                     path.unlink()
                 except Exception as e: 
-                    print(f'[SourceOps ERROR] Failed to remove old file {path}: {e}')
+                    pass
 
     def report(self, message, exception=False):
         if exception: 

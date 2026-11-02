@@ -1,16 +1,28 @@
 import bpy
 
-VTF_FORMATS =["RGBA8888", "ABGR8888", "RGB888", "BGR888", "RGB565", "I8", "IA88", "A8", "RGB888_BLUESCREEN", "BGR888_BLUESCREEN", "ARGB8888", "BGRA8888", "DXT1", "DXT3", "DXT5", "BGRX8888", "BGR565", "BGRX5551", "BGRA4444", "DXT1_ONEBITALPHA", "BGRA5551", "UV88", "UVWQ8888", "RGBA16161616F", "RGBA16161616", "UVLX8888"]
+VTF_FORMATS = ["RGBA8888", "ABGR8888", "RGB888", "BGR888", "RGB565", "I8", "IA88", "A8", "RGB888_BLUESCREEN", "BGR888_BLUESCREEN", "ARGB8888", "BGRA8888", "DXT1", "DXT3", "DXT5", "BGRX8888", "BGR565", "BGRX5551", "BGRA4444", "DXT1_ONEBITALPHA", "BGRA5551", "UV88", "UVWQ8888", "RGBA16161616F", "RGBA16161616", "UVLX8888"]
 VTF_RESIZE_METHODS = ["NEAREST", "BIGGEST", "SMALLEST"]
-VTF_RESIZE_FILTERS =["POINT", "BOX", "TRIANGLE", "QUADRATIC", "CUBIC", "CATROM", "MITCHEL", "GAUSSIAN", "SINC", "BESSEL", "HANNING", "HAMMING", "BLACKMAN", "KAISER"]
-VTF_SHARPEN_FILTERS =["NONE", "NEGATIVE", "LIGHTER", "DARKER", "CONTRASTMORE", "CONTRASTLESS", "SMOOTHEN", "SHARPENSOFT", "SHARPENMEDIUM", "SHARPENSTRONG", "FINDEDGES", "CONTOUR", "EDGEDETECT", "EDGEDETECTSOFT", "EMBOSS", "MEANREMOVAL", "UNSHARP", "XSHARPEN", "WARPSHARP"]
-VTF_NORMAL_KERNELS =["4X", "3X3", "5X5", "7X7", "9X9", "DUDV"]
-VTF_NORMAL_HEIGHTS =["ALPHA", "AVERAGERGB", "BIASEDRGB", "RED", "GREEN", "BLUE", "MAXRGB", "COLORSPACE"]
-VTF_NORMAL_ALPHAS =["NOCHANGE", "HEIGHT", "BLACK", "WHITE"]
+VTF_RESIZE_FILTERS = ["POINT", "BOX", "TRIANGLE", "QUADRATIC", "CUBIC", "CATROM", "MITCHEL", "GAUSSIAN", "SINC", "BESSEL", "HANNING", "HAMMING", "BLACKMAN", "KAISER"]
+VTF_SHARPEN_FILTERS = ["NONE", "NEGATIVE", "LIGHTER", "DARKER", "CONTRASTMORE", "CONTRASTLESS", "SMOOTHEN", "SHARPENSOFT", "SHARPENMEDIUM", "SHARPENSTRONG", "FINDEDGES", "CONTOUR", "EDGEDETECT", "EDGEDETECTSOFT", "EMBOSS", "MEANREMOVAL", "UNSHARP", "XSHARPEN", "WARPSHARP"]
+VTF_NORMAL_KERNELS = ["4X", "3X3", "5X5", "7X7", "9X9", "DUDV"]
+VTF_NORMAL_HEIGHTS = ["ALPHA", "AVERAGERGB", "BIASEDRGB", "RED", "GREEN", "BLUE", "MAXRGB", "COLORSPACE"]
+VTF_NORMAL_ALPHAS = ["NOCHANGE", "HEIGHT", "BLACK", "WHITE"]
+
+VMT_ENVMAP_MASKS = [
+    ("NORMAL_ALPHA", "Normal Map Alpha ($normalmapalphaenvmapmask)", ""),
+    ("BASE_ALPHA", "Base Texture Alpha ($basealphaenvmapmask)", ""),
+    ("NONE", "None", "")
+]
+
+VMT_PHONG_MASKS = [
+    ("NORMAL_ALPHA", "Normal Map Alpha (Default)", ""),
+    ("BASE_ALPHA", "Base Texture Alpha ($basemapalphaphongmask)", "")
+]
 
 class SOURCEOPS_MaterialProps(bpy.types.PropertyGroup):
-    name: bpy.props.StringProperty(name='Material Name', default='example')
-    
+    name: bpy.props.StringProperty(name='Material Name', default='')
+    normal_map: bpy.props.StringProperty(name='Normal Map', default='')
+
     vtf_format: bpy.props.EnumProperty(name="Format", items=[(x, x, "") for x in VTF_FORMATS], default="DXT5")
     vtf_alphaformat: bpy.props.EnumProperty(name="Alpha Format", items=[(x, x, "") for x in VTF_FORMATS], default="DXT5")
     vtf_flag_POINTSAMPLE: bpy.props.BoolProperty(name="POINTSAMPLE")
@@ -60,8 +72,24 @@ class SOURCEOPS_MaterialProps(bpy.types.PropertyGroup):
     vtf_noreflectivity: bpy.props.BoolProperty(name="No Reflectivity Calc", default=False)
     vtf_bumpscale: bpy.props.FloatProperty(name="Bump Scale", default=1.0, min=0.0)
 
-    vmt_shader: bpy.props.EnumProperty(name="VMT Shader",items=[("VertexLitGeneric", "VertexLitGeneric", ""),("UnlitGeneric", "UnlitGeneric", ""),("LightmappedGeneric", "LightmappedGeneric", "")], default="VertexLitGeneric")
+    vmt_shader: bpy.props.EnumProperty(name="VMT Shader", items=[("VertexLitGeneric", "VertexLitGeneric", ""), ("UnlitGeneric", "UnlitGeneric", ""), ("LightmappedGeneric", "LightmappedGeneric", "")], default="VertexLitGeneric")
     vmt_translucent: bpy.props.BoolProperty(name="$translucent", default=False)
     vmt_alphatest: bpy.props.BoolProperty(name="$alphatest", default=False)
     vmt_nocull: bpy.props.BoolProperty(name="$nocull", default=False)
-    vmt_envmap: bpy.props.BoolProperty(name="$envmap", description="Adds env_cubemap reflection properties", default=False)
+    
+    # Cubemap Reflection ($envmap)
+    vmt_envmap: bpy.props.BoolProperty(name="$envmap (Cubemap)", description="Adds env_cubemap reflection properties", default=False)
+    vmt_envmaptint: bpy.props.FloatVectorProperty(name="$envmaptint", subtype='COLOR', size=3, default=(0.3, 0.3, 0.3), min=0.0, max=2.0)
+    vmt_envmapfresnel: bpy.props.BoolProperty(name="$envmapfresnel", description="Reflectivity increases at glancing angles", default=False)
+    vmt_envmapmask_source: bpy.props.EnumProperty(name="Envmap Mask", items=VMT_ENVMAP_MASKS, default="NORMAL_ALPHA")
+
+    # Phong Specular ($phong)
+    vmt_phong: bpy.props.BoolProperty(name="$phong (Specular)", description="Enable Phong specular highlights", default=False)
+    vmt_phongboost: bpy.props.FloatProperty(name="$phongboost", description="Intensity of the specular highlight", default=1.0, min=0.0, precision=2)
+    vmt_phongexponent: bpy.props.IntProperty(name="$phongexponent", description="Tightness and sharpness of highlight (1-255)", default=25, min=1, max=255)
+    vmt_phongtint: bpy.props.FloatVectorProperty(name="$phongtint", subtype='COLOR', size=3, default=(1.0, 1.0, 1.0), min=0.0, max=1.0)
+    vmt_phongalbedotint: bpy.props.BoolProperty(name="$phongalbedotint", description="Tint specular highlights using base texture albedo color", default=False)
+    vmt_phongfresnelranges: bpy.props.StringProperty(name="$phongfresnelranges", description="Fresnel reflection multipliers [min mid max]", default="[0.05 0.5 1]")
+    vmt_phongmask_source: bpy.props.EnumProperty(name="Phong Mask", items=VMT_PHONG_MASKS, default="NORMAL_ALPHA")
+
+    do_not_sort_vmts: bpy.props.BoolProperty(name="Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)", description="When enabled, SourceOps will dump the VMT text block to disk exactly as-is, without any sorting or reformatting", default=False)

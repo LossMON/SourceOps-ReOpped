@@ -270,7 +270,7 @@ class VTFConvertOptions:
             cmd += ['--compression-method', self.compression_method.name] if self.compression_method != COMPRESSION_METHOD.ZSTD else []
             cmd += ['--version', self.version.value] if self.version != VERSION.DEFAULT else []
 
-            cmd += ['disable_mips'] if self.disable_mips else []
+            cmd += ['--no-mips'] if self.disable_mips else []
             cmd += ['--filter', self.filter.name] if self.filter != RESIZE_FILTER.DEFAULT else []
 
 
