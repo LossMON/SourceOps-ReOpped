@@ -173,7 +173,7 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
 
     # Reflectivity ($reflectivity)
     vmt_reflectivity: bpy.props.BoolProperty(name="$reflectivity", description="Enable custom $reflectivity in VMT", default=False)
-    vmt_reflectivity_vec: bpy.props.FloatVectorProperty(name="Reflectivity", size=3, default=(1.0, 1.0, 1.0), min=0.0, max=100.0, description="Reflectivity amount [X Y Z] (defaults to 1 1 1)")
+    vmt_reflectivity_vec: bpy.props.FloatVectorProperty(name="Reflectivity", subtype='COLOR', size=3, default=(1.0, 1.0, 1.0), min=0.0, max=1.0, description="Amount of reflected light [R G B]")
 
     # Phong Specular ($phong)
     vmt_phong: bpy.props.BoolProperty(name="$phong (Specular)", description="Enable Phong specular highlights", default=False)
