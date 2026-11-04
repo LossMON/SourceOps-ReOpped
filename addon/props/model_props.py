@@ -170,6 +170,8 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     vmt_envmaptint: bpy.props.FloatVectorProperty(name="Envmap Tint", subtype='COLOR', size=3, default=(0.3, 0.3, 0.3), min=0.0, max=2.0)
     vmt_envmapfresnel: bpy.props.BoolProperty(name="$envmapfresnel", description="Reflectivity increases at glancing angles", default=False)
     vmt_envmapmask_source: bpy.props.EnumProperty(name="Envmap Mask", items=VMT_ENVMAP_MASKS, default="NORMAL_ALPHA")
+
+    # Reflectivity ($reflectivity)
     vmt_reflectivity: bpy.props.BoolProperty(name="$reflectivity", description="Enable custom $reflectivity in VMT", default=False)
     vmt_reflectivity_vec: bpy.props.FloatVectorProperty(name="Reflectivity", size=3, default=(1.0, 1.0, 1.0), min=0.0, max=100.0, description="Reflectivity amount [X Y Z] (defaults to 1 1 1)")
 
@@ -179,7 +181,7 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     vmt_phongexponent: bpy.props.IntProperty(name="$phongexponent", description="Tightness and sharpness of highlight (1-255)", default=25, min=1, max=255)
     vmt_phongtint: bpy.props.FloatVectorProperty(name="$phongtint", subtype='COLOR', size=3, default=(1.0, 1.0, 1.0), min=0.0, max=1.0)
     vmt_phongalbedotint: bpy.props.BoolProperty(name="$phongalbedotint", description="Tint specular highlights using base texture albedo color", default=False)
-    vmt_phongfresnelranges: bpy.props.StringProperty(name="$phongfresnelranges", description="Fresnel reflection multipliers [min mid max]", default="[0.05 0.5 1]")
+    vmt_phongfresnelranges: bpy.props.FloatVectorProperty(name="$phongfresnelranges", size=3, default=(0.05, 0.5, 1.0), min=0.0, max=100.0, precision=3, description="Fresnel reflection multipliers [min mid max]")
     vmt_phongmask_source: bpy.props.EnumProperty(name="Phong Mask", items=VMT_PHONG_MASKS, default="NORMAL_ALPHA")
 
     do_not_sort_vmts: bpy.props.BoolProperty(name="Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)", description="When enabled, SourceOps will dump the VMT text block to disk exactly as-is, without any sorting or reformatting", default=False)

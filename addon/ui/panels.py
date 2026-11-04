@@ -197,9 +197,14 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                         col.prop(model, 'vmt_envmaptint')
                     col.prop(model, 'vmt_envmapfresnel')
                     col.prop(model, 'vmt_envmapmask_source')
-                    col.prop(model, 'vmt_reflectivity', text='Enable $reflectivity')
-                    if model.vmt_reflectivity:
-                        col.prop(model, 'vmt_reflectivity_vec')
+
+                # Global Reflectivity ($reflectivity)
+                box.separator()
+                box.label(text='Reflectivity ($reflectivity):', icon='SHADING_RENDERED')
+                col = common.split_column(box)
+                col.prop(model, 'vmt_reflectivity', text='Enable $reflectivity')
+                if model.vmt_reflectivity:
+                    col.prop(model, 'vmt_reflectivity_vec')
                 # Global Phong Specular ($phong)
                 box.separator()
                 box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
@@ -628,9 +633,14 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                 col.prop(config, 'vmt_envmaptint')
             col.prop(config, 'vmt_envmapfresnel')
             col.prop(config, 'vmt_envmapmask_source')
-            col.prop(config, 'vmt_reflectivity', text='Enable $reflectivity')
-            if config.vmt_reflectivity:
-                col.prop(config, 'vmt_reflectivity_vec')
+
+        # --- REFLECTIVITY ($reflectivity) ---
+        box.separator()
+        box.label(text='Reflectivity ($reflectivity):', icon='SHADING_RENDERED')
+        col = common.split_column(box)
+        col.prop(config, 'vmt_reflectivity', text='Enable $reflectivity')
+        if config.vmt_reflectivity:
+            col.prop(config, 'vmt_reflectivity_vec')
         # --- PHONG SPECULAR ($phong) ---
         box.separator()
         box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')

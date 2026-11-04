@@ -195,7 +195,9 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
             vmt_lines.append('    "$phong" "1"')
             vmt_lines.append(f'    "$phongboost" "{getattr(config, "vmt_phongboost", 1.0):.2f}"')
             vmt_lines.append(f'    "$phongexponent" "{getattr(config, "vmt_phongexponent", 25)}"')
-            vmt_lines.append(f'    "$phongfresnelranges" "{getattr(config, "vmt_phongfresnelranges", "[0.05 0.5 1]")}"')
+            pfr = getattr(config, "vmt_phongfresnelranges", (0.05, 0.5, 1.0))
+            pfr_str = pfr if isinstance(pfr, str) else f"[{pfr[0]:g} {pfr[1]:g} {pfr[2]:g}]"
+            vmt_lines.append(f'    "$phongfresnelranges" "{pfr_str}"')
             if getattr(config, "vmt_phongalbedotint", False):
                 vmt_lines.append('    "$phongalbedotint" "1"')
             else:
@@ -218,9 +220,10 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                 vmt_lines.append('    "$normalmapalphaenvmapmask" 1')
             elif mask_src == "BASE_ALPHA":
                 vmt_lines.append('    "$basealphaenvmapmask" 1')
-            if getattr(config, "vmt_reflectivity", False):
-                rf = getattr(config, "vmt_reflectivity_vec", (1.0, 1.0, 1.0))
-                vmt_lines.append(f'    "$reflectivity" "[{rf[0]:g} {rf[1]:g} {rf[2]:g}]"')
+
+        if getattr(config, "vmt_reflectivity", False):
+            rf = getattr(config, "vmt_reflectivity_vec", (1.0, 1.0, 1.0))
+            vmt_lines.append(f'    "$reflectivity" "[{rf[0]:g} {rf[1]:g} {rf[2]:g}]"')
         if custom_lines:
             vmt_lines.append('')
             for cl in custom_lines:
@@ -293,7 +296,7 @@ class SOURCEOPS_OT_ResetVMT(bpy.types.Operator):
         config.vmt_phongexponent = 25
         config.vmt_phongtint = (1.0, 1.0, 1.0)
         config.vmt_phongalbedotint = False
-        config.vmt_phongfresnelranges = "[0.05 0.5 1]"
+        config.vmt_phongfresnelranges = (0.05, 0.5, 1.0)
         config.vmt_phongmask_source = 'NORMAL_ALPHA'
         config.vtf_normal_map = False
         config.do_not_sort_vmts = False
