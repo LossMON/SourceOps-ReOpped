@@ -208,8 +208,9 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
         # Live Cubemap Reflection ($envmap) from UI
         if getattr(config, "vmt_envmap", False):
             vmt_lines.append('    "$envmap" "env_cubemap"')
-            et = getattr(config, "vmt_envmaptint", (0.3, 0.3, 0.3))
-            vmt_lines.append(f'    "$envmaptint" "[{et[0]:.2f} {et[1]:.2f} {et[2]:.2f}]"')
+            if getattr(config, "vmt_use_envmaptint", False):
+                et = getattr(config, "vmt_envmaptint", (0.3, 0.3, 0.3))
+                vmt_lines.append(f'    "$envmaptint" "[{et[0]:.2f} {et[1]:.2f} {et[2]:.2f}]"')
             if getattr(config, "vmt_envmapfresnel", False):
                 vmt_lines.append('    "$envmapfresnel" "1"')
             mask_src = getattr(config, "vmt_envmapmask_source", "NORMAL_ALPHA")
@@ -217,7 +218,9 @@ class SOURCEOPS_OT_PreviewVMT(bpy.types.Operator):
                 vmt_lines.append('    "$normalmapalphaenvmapmask" 1')
             elif mask_src == "BASE_ALPHA":
                 vmt_lines.append('    "$basealphaenvmapmask" 1')
-
+            if getattr(config, "vmt_reflectivity", False):
+                rf = getattr(config, "vmt_reflectivity_vec", (1.0, 1.0, 1.0))
+                vmt_lines.append(f'    "$reflectivity" "[{rf[0]:g} {rf[1]:g} {rf[2]:g}]"')
         if custom_lines:
             vmt_lines.append('')
             for cl in custom_lines:
@@ -279,9 +282,12 @@ class SOURCEOPS_OT_ResetVMT(bpy.types.Operator):
         config.vmt_alphatest = False
         config.vmt_nocull = False
         config.vmt_envmap = False
+        config.vmt_use_envmaptint = False
         config.vmt_envmaptint = (0.3, 0.3, 0.3)
         config.vmt_envmapfresnel = False
         config.vmt_envmapmask_source = 'NORMAL_ALPHA'
+        config.vmt_reflectivity = False
+        config.vmt_reflectivity_vec = (1.0, 1.0, 1.0)
         config.vmt_phong = False
         config.vmt_phongboost = 1.0
         config.vmt_phongexponent = 25

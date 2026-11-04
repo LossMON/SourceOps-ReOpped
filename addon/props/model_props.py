@@ -166,9 +166,12 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     
     # Cubemap Reflection ($envmap)
     vmt_envmap: bpy.props.BoolProperty(name="$envmap (Cubemap)", description="Adds env_cubemap reflection properties", default=False)
-    vmt_envmaptint: bpy.props.FloatVectorProperty(name="$envmaptint", subtype='COLOR', size=3, default=(0.3, 0.3, 0.3), min=0.0, max=2.0)
+    vmt_use_envmaptint: bpy.props.BoolProperty(name="$envmaptint", description="Enable custom cubemap tint color", default=False)
+    vmt_envmaptint: bpy.props.FloatVectorProperty(name="Envmap Tint", subtype='COLOR', size=3, default=(0.3, 0.3, 0.3), min=0.0, max=2.0)
     vmt_envmapfresnel: bpy.props.BoolProperty(name="$envmapfresnel", description="Reflectivity increases at glancing angles", default=False)
     vmt_envmapmask_source: bpy.props.EnumProperty(name="Envmap Mask", items=VMT_ENVMAP_MASKS, default="NORMAL_ALPHA")
+    vmt_reflectivity: bpy.props.BoolProperty(name="$reflectivity", description="Enable custom $reflectivity in VMT", default=False)
+    vmt_reflectivity_vec: bpy.props.FloatVectorProperty(name="Reflectivity", size=3, default=(1.0, 1.0, 1.0), min=0.0, max=100.0, description="Reflectivity amount [X Y Z] (defaults to 1 1 1)")
 
     # Phong Specular ($phong)
     vmt_phong: bpy.props.BoolProperty(name="$phong (Specular)", description="Enable Phong specular highlights", default=False)
