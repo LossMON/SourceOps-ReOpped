@@ -11,6 +11,13 @@
 
 ## **Video Tutorial**
 [Watch the video tutorial](https://www.youtube.com/watch?v=RWKZuFzWLZE)
+<img width="913" height="537" alt="photo1" src="https://github.com/user-attachments/assets/b6624b13-901d-43df-8659-bec96e1f3d27" />
+
+<img width="913" height="820" alt="photo2" src="https://github.com/user-attachments/assets/65b41315-837c-4be9-bc11-0c7a8df8b3b5" />
+
+<img width="893" height="610" alt="photo3" src="https://github.com/user-attachments/assets/095ffcbe-84cb-4f88-bf72-181fc5509a22" />
+
+<img width="883" height="804" alt="photo4" src="https://github.com/user-attachments/assets/2f3c37ae-9962-41d8-8c69-9fdfc9403e42" />
 
 ---
 
@@ -48,6 +55,10 @@ If you need a physics mesh that actually fits your model:
     *   **Set it to 0:** Most detailed and accurate (creates more hulls).
     *   **Set it to 1:** Simplest and fastest (creates fewer hulls).
     *   Adjust the slider between **0 and 1** to find what works best for your specific model.
+<img width="1111" height="746" alt="photo 1" src="https://github.com/user-attachments/assets/a0896a51-919a-4a35-abba-2265fec56aaa" />
+
+<img width="1118" height="759" alt="photo 2" src="https://github.com/user-attachments/assets/d02af541-a39d-4392-8e4d-fc51e6fd1eb7" />
+
 
 ---
 
