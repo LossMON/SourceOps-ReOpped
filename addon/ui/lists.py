@@ -29,8 +29,18 @@ class SOURCEOPS_UL_MaterialList(bpy.types.UIList):
 
 class SOURCEOPS_UL_SkinList(bpy.types.UIList):
     bl_idname = 'SOURCEOPS_UL_SkinList'
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
-        layout.prop(item, 'name', text='', emboss=False, translate=False)
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, *args):
+        try:
+            skin_num = list(data.skin_items).index(item)
+        except Exception:
+            skin_num = args[0] if args else 0
+
+        split = layout.split(factor=0.48)
+        split.prop(item, 'name', text='', emboss=False, translate=False)
+
+        sub = split.row()
+        sub.enabled = False
+        sub.label(text=f"Skin {skin_num}")
 
 class SOURCEOPS_UL_SequenceList(bpy.types.UIList):
     bl_idname = 'SOURCEOPS_UL_SequenceList'

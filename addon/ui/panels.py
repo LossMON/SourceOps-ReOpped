@@ -115,6 +115,11 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
 
                 col.prop(model, 'bodygroups')
                 col.prop(model, 'stacking')
+
+                box.separator()
+                row = box.row()
+                row.alignment = 'CENTER'
+                row.label(text='(Global Material Settings, Materials that are listed in materials properties will ignore these Global Settings)')
                 
                 # --- MODEL GLOBAL TEXTURE SETTINGS ---
                 box.separator()
@@ -360,7 +365,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             box = layout.box()
             row = box.row()
             row.alignment = 'CENTER'
-            row.label(text='Skins (Overrides)')
+            row.label(text='Skins')
 
             row = box.row()
             row.template_list('SOURCEOPS_UL_SkinList', '', model, 'skin_items', model, 'skin_index', rows=4)
@@ -368,21 +373,39 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             self.draw_list_buttons(col, 'SKINS')
 
             if skin:
-                col = common.split_column(box)
+                split = box.split(factor=0.40)
+                col_info = split.column()
+                col_info.scale_y = 0.8
+                col_info.label(text='Skin 0 = Material in Blender', icon='INFO')
+                col_info.label(text='Linked = Materials that swap')
+                col_info.separator(factor=0.4)
+                col_info.label(text='Example:')
+                col_info.label(text='• Skin 0 (Base):')
+                col_info.label(text='  table_bluechair')
+                col_info.label(text='  + Link: table_bluecup')
+                col_info.label(text='• Skin 1 (New):')
+                col_info.label(text='  table_redchair')
+                col_info.label(text='  + Link: table_redcup')
+
+                col_right = split.column()
+                col = common.split_column(col_right)
                 col.prop_search(skin, 'name', bpy.data, 'materials', text='Skin Material')
                 col.prop_search(skin, 'add_linked_skin', bpy.data, 'materials', text='Linked Skins', icon='ADD')
 
+                box_links = col_right.box()
+                box_links.scale_y = 0.85
                 linked_mats = [m for m in skin.linked_materials.split() if m]
                 if linked_mats:
-                    box_links = box.box()
                     h_row = box_links.row(align=True)
-                    h_row.label(text="Linked Skins (" + str(len(linked_mats)) + "):", icon='LINKED')
-                    h_row.operator('sourceops.clear_linked_materials', text='Clear All', icon='X')
+                    h_row.label(text="Linked (" + str(len(linked_mats)) + "):", icon='LINKED')
+                    h_row.operator('sourceops.clear_linked_materials', text='Clear', icon='X')
                     for l_mat in linked_mats:
                         p_row = box_links.row(align=True)
                         p_row.label(text=l_mat, icon='MATERIAL')
                         rm_op = p_row.operator('sourceops.remove_linked_material', text='', icon='X')
                         rm_op.material_name = l_mat
+                else:
+                    box_links.label(text="No linked skins", icon='LINKED')
 
         elif model and sourceops.panel == 'SEQUENCES':
             box = layout.box()
