@@ -1,15 +1,13 @@
-﻿import bpy
+import bpy
 from . model_props import SOURCEOPS_ModelProps
 from . map_props import SOURCEOPS_MapProps
 from . surface_props import SOURCEOPS_SurfaceProps
 
 def update_view_model(self, context):
-    # If standard View Model is checked, uncheck View Model++
     if self.auto_view_model:
         self.auto_view_model_plusplus = False
 
 def update_view_model_plusplus(self, context):
-    # If View Model++ is checked, uncheck standard View Model
     if self.auto_view_model_plusplus:
         self.auto_view_model = False
 
@@ -56,6 +54,39 @@ class SOURCEOPS_GlobalProps(bpy.types.PropertyGroup):
     auto_overwrite_vtf: bpy.props.BoolProperty(name='Overwrite VTF', description='If enabled, existing VTF files will be overwritten.', default=True)
     auto_overwrite_vmt: bpy.props.BoolProperty(name='Overwrite VMT', description='If enabled, existing VMT files will be overwritten.', default=True)
 
+    # --- TEXTURE COMBINER PROPERTIES ---
+    combiner_target_collection: bpy.props.PointerProperty(
+        name='Target Collection',
+        description='Select the collection containing the model meshes to combine',
+        type=bpy.types.Collection,
+    )
+    combiner_atlas_size: bpy.props.EnumProperty(
+        name='Atlas Resolution',
+        description='Resolution of the baked atlas texture (Max 4K)',
+        items=[
+            ('512', '512 x 512', ''),
+            ('1024', '1024 x 1024 (1K)', ''),
+            ('2048', '2048 x 2048 (2K)', ''),
+            ('4096', '4096 x 4096 (4K)', ''),
+        ],
+        default='2048',
+    )
+    combiner_bake_margin: bpy.props.IntProperty(
+        name='Bake Margin (px)',
+        description='Pixel margin around UV islands to prevent edge bleeding',
+        default=12,
+        min=0,
+        max=64,
+    )
+    combiner_uv_margin: bpy.props.FloatProperty(
+        name='UV Island Margin',
+        description='Spacing between UV islands in the atlas unwrap',
+        default=0.012,
+        min=0.0,
+        max=0.1,
+        precision=3,
+    )
+
     panel: bpy.props.EnumProperty(
         name='Panel',
         description='Which panel to display',
@@ -71,5 +102,6 @@ class SOURCEOPS_GlobalProps(bpy.types.PropertyGroup):
             ('MAPS', 'Maps', 'Display the maps panel', 'MOD_BUILD', 9),
             ('SIMULATION', 'Simulation', 'Display the simulation panel', 'PHYSICS', 10),
             ('MISC', 'Misc', 'Display the misc panel', 'MONKEY', 11),
+            ('TEXTURE_COMBINER', 'Texture Combiner', 'Display the texture combiner panel', 'IMAGE', 12),
         ],
     )

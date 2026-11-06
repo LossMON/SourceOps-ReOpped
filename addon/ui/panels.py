@@ -3,6 +3,38 @@ from .. utils import common
 from .. import icons
 
 
+def get_material_preview_icon(layout, mat):
+    if not mat:
+        return 0, 'MATERIAL'
+    if mat.use_nodes and mat.node_tree:
+        img_node = next((n for n in mat.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image), None)
+        if img_node and img_node.image:
+            img = img_node.image
+            if hasattr(img, 'preview_ensure'):
+                img.preview_ensure()
+            try:
+                val = layout.icon(img)
+                if val:
+                    return val, ''
+            except Exception:
+                pass
+            if getattr(img, 'preview', None) and img.preview.icon_id:
+                return img.preview.icon_id, ''
+
+    if hasattr(mat, 'preview_ensure'):
+        mat.preview_ensure()
+    try:
+        val = layout.icon(mat)
+        if val:
+            return val, ''
+    except Exception:
+        pass
+    if getattr(mat, 'preview', None) and mat.preview.icon_id:
+        return mat.preview.icon_id, ''
+
+    return 0, 'MATERIAL'
+
+
 class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
     bl_idname = 'SOURCEOPS_PT_MainPanel'
     bl_space_type = 'VIEW_3D'
@@ -121,7 +153,6 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                 row.alignment = 'CENTER'
                 row.label(text='(Global Material Settings, Materials that are listed in materials properties will ignore these Global Settings)')
                 
-                # --- MODEL GLOBAL TEXTURE SETTINGS ---
                 box.separator()
                 box.label(text='Model Default Textures:', icon='TEXTURE')
                 col = common.split_column(box)
@@ -210,6 +241,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                 col.prop(model, 'vmt_reflectivity', text='Enable $reflectivity')
                 if model.vmt_reflectivity:
                     col.prop(model, 'vmt_reflectivity_vec')
+
                 # Global Phong Specular ($phong)
                 box.separator()
                 box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
@@ -344,7 +376,6 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                 if material_item.normal_map:
                     n_row.operator('sourceops.clear_normal_map', text='', icon='X')
 
-                # Parameters are always visible in the NormalMap box
                 norm_box.separator()
                 norm_box.label(text='Normal Map Settings (-normal):', icon='MATFLUID')
                 gen_col = common.split_column(norm_box)
@@ -361,7 +392,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             else:
                 norm_box.label(text='Select a material above to configure Normal Map', icon='INFO')
 
-            # --- SKINS (OVERRIDES) LIST ---
+            # --- SKINS LIST ---
             box = layout.box()
             row = box.row()
             row.alignment = 'CENTER'
@@ -571,6 +602,86 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             col.operator('sourceops.pose_bone_transforms', text='Copy Pose Bone Translation').type = 'TRANSLATION'
             col.operator('sourceops.pose_bone_transforms', text='Copy Pose Bone Rotation').type = 'ROTATION'
 
+        if sourceops and sourceops.panel == 'TEXTURE_COMBINER':
+            box = layout.box()
+
+            row = box.row()
+            row.alignment = 'CENTER'
+            row.label(text='Texture Combiner', icon='IMAGE')
+
+            box_col = box.box()
+            box_col.label(text='Model Collection:', icon='OUTLINER_COLLECTION')
+            row = box_col.row(align=True)
+            row.prop(sourceops, 'combiner_target_collection', text='')
+            row.operator('sourceops.combiner_pick_active', text='', icon='EYEDROPPER')
+
+            target_col = sourceops.combiner_target_collection
+
+            if target_col:
+                mesh_objs = [o for o in target_col.all_objects if o.type == 'MESH']
+
+                if mesh_objs:
+                    materials_in_col = []
+                    seen_mats = set()
+                    for o in mesh_objs:
+                        for slot in o.material_slots:
+                            if slot.material and slot.material not in seen_mats:
+                                seen_mats.add(slot.material)
+                                materials_in_col.append(slot.material)
+
+                    box_mats = box.box()
+                    if materials_in_col:
+                        selected_count = sum(1 for m in materials_in_col if getattr(m, 'sourceops_combine', True))
+                        h_row = box_mats.row(align=True)
+                        h_row.label(text=f"Materials to Combine ({selected_count}/{len(materials_in_col)}):", icon='MATERIAL')
+                        h_row.operator('sourceops.combiner_select_all_mats', text='All', icon='CHECKBOX_HLT')
+                        h_row.operator('sourceops.combiner_deselect_all_mats', text='None', icon='CHECKBOX_DEHLT')
+
+                        col_mats = box_mats.column(align=True)
+                        col_mats.scale_y = 1.05
+                        for mat in materials_in_col:
+                            row = col_mats.row(align=True)
+                            row.prop(mat, 'sourceops_combine', text='')
+                            icon_val, icon_str = get_material_preview_icon(layout, mat)
+                            if icon_val:
+                                row.label(text=mat.name, icon_value=icon_val)
+                            else:
+                                row.label(text=mat.name, icon=icon_str)
+                    else:
+                        box_mats.label(text='No materials found on meshes in this collection!', icon='ERROR')
+
+                    box_settings = box.box()
+                    box_settings.label(text='Atlas Bake Settings:', icon='SETTINGS')
+                    col_set = common.split_column(box_settings)
+                    col_set.prop(sourceops, 'combiner_uv_method', text='Method')
+                    col_set.prop(sourceops, 'combiner_atlas_size', text='Atlas Size')
+
+                    if sourceops.combiner_atlas_size == 'AUTO' and materials_in_col:
+                        try:
+                            from ..texture_combiner.atlas_texture_converter import calculate_auto_atlas_size
+                            sel_mats = [m for m in materials_in_col if getattr(m, 'sourceops_combine', True)]
+                            auto_res = calculate_auto_atlas_size(sel_mats, max_size=4096)
+                            col_set.label(text=f"Auto Size: {auto_res} x {auto_res}", icon='INFO')
+                        except Exception:
+                            pass
+
+                    col_set.prop(sourceops, 'combiner_bake_margin', text='Margin (px)')
+                    col_set.prop(sourceops, 'combiner_uv_margin', text='UV Island Margin')
+
+                    box.separator()
+                    row = box.row()
+                    row.scale_y = 1.6
+                    row.operator('sourceops.combine_textures', text='Combine Textures', icon='OUTPUT')
+                else:
+                    box.label(text='This collection contains no mesh objects!', icon='ERROR')
+            else:
+                box_info = box.box()
+                col_info = box_info.column()
+                col_info.label(text='1. Select the collection containing your model meshes.', icon='INFO')
+                col_info.label(text='2. All materials across the collection are auto-detected.', icon='BLANK1')
+                col_info.label(text='3. Choose which materials to combine into the atlas.', icon='BLANK1')
+                col_info.label(text='Combines textures into a single shared atlas.', icon='BLANK1')
+
     def draw_texture_settings(self, box, config, item_type):
         col = common.split_column(box)
         col.prop_search(config, 'name', bpy.data, 'materials', text='Material Name')
@@ -602,7 +713,6 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             col.prop(config, 'vtf_rclampwidth')
             col.prop(config, 'vtf_rclampheight')
 
-        # --- GENERATE NORMAL MAP (Procedural from base texture) ---
         box.separator()
         box.label(text='Normal Maps (-normal):', icon='MATFLUID')
         col = common.split_column(box)
@@ -664,6 +774,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
         col.prop(config, 'vmt_reflectivity', text='Enable $reflectivity')
         if config.vmt_reflectivity:
             col.prop(config, 'vmt_reflectivity_vec')
+
         # --- PHONG SPECULAR ($phong) ---
         box.separator()
         box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
