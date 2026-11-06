@@ -609,6 +609,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             row.alignment = 'CENTER'
             row.label(text='Texture Combiner', icon='IMAGE')
 
+            # --- COLLECTION SELECTION ---
             box_col = box.box()
             box_col.label(text='Model Collection:', icon='OUTLINER_COLLECTION')
             row = box_col.row(align=True)
@@ -629,6 +630,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                                 seen_mats.add(slot.material)
                                 materials_in_col.append(slot.material)
 
+                    # --- MATERIALS SELECTION ---
                     box_mats = box.box()
                     if materials_in_col:
                         selected_count = sum(1 for m in materials_in_col if getattr(m, 'sourceops_combine', True))
@@ -650,24 +652,24 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                     else:
                         box_mats.label(text='No materials found on meshes in this collection!', icon='ERROR')
 
+                    # --- PROPERTIES BOX ---
                     box_settings = box.box()
-                    box_settings.label(text='Atlas Bake Settings:', icon='SETTINGS')
+                    box_settings.label(text='Properties:', icon='SETTINGS')
                     col_set = common.split_column(box_settings)
-                    col_set.prop(sourceops, 'combiner_uv_method', text='Method')
-                    col_set.prop(sourceops, 'combiner_atlas_size', text='Atlas Size')
+                    col_set.prop(sourceops, 'combiner_atlas_size', text='Atlas size')
 
-                    if sourceops.combiner_atlas_size == 'AUTO' and materials_in_col:
-                        try:
-                            from ..texture_combiner.atlas_texture_converter import calculate_auto_atlas_size
-                            sel_mats = [m for m in materials_in_col if getattr(m, 'sourceops_combine', True)]
-                            auto_res = calculate_auto_atlas_size(sel_mats, max_size=4096)
-                            col_set.label(text=f"Auto Size: {auto_res} x {auto_res}", icon='INFO')
-                        except Exception:
-                            pass
+                    # Switch: Quadratic / Power of 2 / Auto shows SMC settings
+                    if sourceops.combiner_atlas_size in {'QUAD', 'PO2', 'AUTO'}:
+                        col_set.prop(sourceops, 'combiner_crop')
+                        col_set.prop(sourceops, 'combiner_pixel_art')
+                        col_set.prop(sourceops, 'combiner_diffuse_size')
+                        col_set.prop(sourceops, 'combiner_gaps')
+                    else:
+                        # 2048, 512, 1024, 4096: shows old settings only
+                        col_set.prop(sourceops, 'combiner_bake_margin', text='Margin (px)')
+                        col_set.prop(sourceops, 'combiner_uv_margin', text='UV Island Margin')
 
-                    col_set.prop(sourceops, 'combiner_bake_margin', text='Margin (px)')
-                    col_set.prop(sourceops, 'combiner_uv_margin', text='UV Island Margin')
-
+                    # --- APPLY BUTTON ---
                     box.separator()
                     row = box.row()
                     row.scale_y = 1.6
@@ -679,7 +681,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                 col_info = box_info.column()
                 col_info.label(text='1. Select the collection containing your model meshes.', icon='INFO')
                 col_info.label(text='2. All materials across the collection are auto-detected.', icon='BLANK1')
-                col_info.label(text='3. Choose which materials to combine into the atlas.', icon='BLANK1')
+                col_info.label(text='3. Choose options and click Combine Textures.', icon='BLANK1')
                 col_info.label(text='Combines textures into a single shared atlas.', icon='BLANK1')
 
     def draw_texture_settings(self, box, config, item_type):

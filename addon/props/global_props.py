@@ -61,18 +61,21 @@ class SOURCEOPS_GlobalProps(bpy.types.PropertyGroup):
         type=bpy.types.Collection,
     )
     combiner_atlas_size: bpy.props.EnumProperty(
-        name='Atlas Resolution',
-        description='Resolution of the baked atlas texture (Max 4K)',
+        name='Atlas size',
+        description='Select atlas size or mode',
         items=[
-            ('512', '512 x 512', ''),
-            ('1024', '1024 x 1024 (1K)', ''),
-            ('2048', '2048 x 2048 (2K)', ''),
-            ('4096', '4096 x 4096 (4K)', ''),
+            ('2048', '2048 x 2048 (2K)', 'Standard 2048x2048 bake'),
+            ('512', '512 x 512', 'Standard 512x512 bake'),
+            ('1024', '1024 x 1024 (1K)', 'Standard 1024x1024 bake'),
+            ('4096', '4096 x 4096 (4K)', 'Standard 4096x4096 bake'),
+            ('QUAD', 'Quadratic', 'Square Power of 2 (Auto fit up to 4K)'),
+            ('PO2', 'Power of 2', 'Power of 2 (Auto fit up to 4K)'),
+            ('AUTO', 'Automatic', 'Minimal size fitting textures'),
         ],
         default='2048',
     )
     combiner_bake_margin: bpy.props.IntProperty(
-        name='Bake Margin (px)',
+        name='Margin (px)',
         description='Pixel margin around UV islands to prevent edge bleeding',
         default=12,
         min=0,
@@ -85,6 +88,30 @@ class SOURCEOPS_GlobalProps(bpy.types.PropertyGroup):
         min=0.0,
         max=0.1,
         precision=3,
+    )
+    combiner_crop: bpy.props.BoolProperty(
+        name='Crop outside images by UV',
+        description='Align and crop images by UV if materials have UV coordinates outside bounds',
+        default=True,
+    )
+    combiner_pixel_art: bpy.props.BoolProperty(
+        name='Pixel Art / Small Textures',
+        description='Avoids 1-pixel UV scaling for small textures',
+        default=False,
+    )
+    combiner_diffuse_size: bpy.props.IntProperty(
+        name='Size of materials without image',
+        description='Select the size in pixels for materials that only consist of a color',
+        min=8,
+        max=256,
+        default=32,
+    )
+    combiner_gaps: bpy.props.IntProperty(
+        name='Size of gaps between images',
+        description='Select size of gaps between images',
+        min=0,
+        max=32,
+        default=0,
     )
 
     panel: bpy.props.EnumProperty(
