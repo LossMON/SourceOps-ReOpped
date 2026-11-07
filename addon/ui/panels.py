@@ -607,7 +607,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
 
             row = box.row()
             row.alignment = 'CENTER'
-            row.label(text='Texture Combiner', icon='IMAGE')
+            row.label(text='Texture Combiner BETA (Still buggy)', icon='IMAGE')
 
             # --- COLLECTION SELECTION ---
             box_col = box.box()
@@ -658,12 +658,15 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                     col_set = common.split_column(box_settings)
                     col_set.prop(sourceops, 'combiner_atlas_size', text='Atlas size')
 
-                    # Switch: Quadratic / Power of 2 / Auto shows SMC settings
-                    if sourceops.combiner_atlas_size in {'QUAD', 'PO2', 'AUTO'}:
+                    # Switch: Quadratic / Power of 2 / Auto / Custom shows SMC settings
+                    if sourceops.combiner_atlas_size in {'QUAD', 'PO2', 'AUTO', 'CUSTOM'}:
                         col_set.prop(sourceops, 'combiner_crop')
                         col_set.prop(sourceops, 'combiner_pixel_art')
                         col_set.prop(sourceops, 'combiner_diffuse_size')
                         col_set.prop(sourceops, 'combiner_gaps')
+                        if sourceops.combiner_atlas_size == 'CUSTOM':
+                            col_set.prop(sourceops, 'combiner_custom_width')
+                            col_set.prop(sourceops, 'combiner_custom_height')
                     else:
                         # 2048, 512, 1024, 4096: shows old settings only
                         col_set.prop(sourceops, 'combiner_bake_margin', text='Margin (px)')

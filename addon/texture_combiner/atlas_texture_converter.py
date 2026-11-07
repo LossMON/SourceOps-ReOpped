@@ -22,7 +22,7 @@ def popup(message, *, error=False):
             for line in lines[:7]:
                 self.layout.label(text=line)
         bpy.context.window_manager.popup_menu(
-            draw, title='Texture Combiner — ' + ('Error' if error else 'Done'),
+            draw, title='Texture Combiner â€” ' + ('Error' if error else 'Done'),
             icon='ERROR' if error else 'CHECKMARK')
     except Exception:
         pass
@@ -250,6 +250,7 @@ def create_smc_atlas(target_col, custom_filepath=None, selected_mats=None, size_
 
     atlas_uv_name = 'Atlas_UV'
 
+    # Step 1: Initialize new UV Maps
     for obj in participating_objs:
         orig_uv = next((u for u in obj.data.uv_layers if u.active_render), None) or obj.data.uv_layers.active
         if not orig_uv: orig_uv = obj.data.uv_layers.new(name='UVMap')
@@ -259,63 +260,115 @@ def create_smc_atlas(target_col, custom_filepath=None, selected_mats=None, size_
         obj.data.uv_layers.active = new_uv
 
     structure = {}
+
+    # Step 2: Extract whole-material UV bounds (Preserve polygon continuity)
     for mat in selected_mats:
-        structure[mat] = {'uvs': [], 'gfx': {}}
-
-    for obj in participating_objs:
-        new_uv_layer = obj.data.uv_layers.active.data
-        for poly in obj.data.polygons:
-            slot_mat = obj.material_slots[poly.material_index].material if poly.material_index < len(obj.material_slots) else None
-            if slot_mat in selected_mats:
-                face_uvs = [new_uv_layer[l].uv for l in poly.loop_indices]
-                min_x = math.floor(min((uv.x for uv in face_uvs if not math.isnan(uv.x)), default=0))
-                min_y = math.floor(min((uv.y for uv in face_uvs if not math.isnan(uv.y)), default=0))
-                
-                if min_x != 0 or min_y != 0:
+        structure[mat] = {'gfx': {}}
+        mat_uvs = []
+        for obj in participating_objs:
+            uv_layer = obj.data.uv_layers.active.data
+            for poly in obj.data.polygons:
+                slot_mat = obj.material_slots[poly.material_index].material if poly.material_index < len(obj.material_slots) else None
+                if slot_mat == mat:
                     for l in poly.loop_indices:
-                        new_uv_layer[l].uv.x -= min_x
-                        new_uv_layer[l].uv.y -= min_y
-                
-                for l in poly.loop_indices:
-                    structure[slot_mat]['uvs'].append(new_uv_layer[l].uv.copy())
+                        mat_uvs.append(uv_layer[l].uv)
 
-    entry_is_solid = {}
+        if mat_uvs:
+            u_vals = [uv.x for uv in mat_uvs if not math.isnan(uv.x)]
+            v_vals = [uv.y for uv in mat_uvs if not math.isnan(uv.y)]
+            min_u = min(u_vals) if u_vals else 0.0
+            max_u = max(u_vals) if u_vals else 1.0
+            min_v = min(v_vals) if v_vals else 0.0
+            max_v = max(v_vals) if v_vals else 1.0
 
+            # Expand bounds slightly to prevent edge filtering clipping
+            min_u -= 0.001
+            max_u += 0.001
+            min_v -= 0.001
+            max_v += 0.001
+
+            structure[mat]['uv_bounds'] = (min_u, max_u, min_v, max_v)
+        else:
+            structure[mat]['uv_bounds'] = (0.0, 1.0, 0.0, 1.0)
+
+    # Step 3: Identify texture sizes, Solid Colors, and Crop Boundaries
     for mat, item in structure.items():
         img = get_material_shader_image(mat)
+        
+        is_solid = False
+        col = (0.8, 0.8, 0.8, 1.0)
+        
         if img:
             if img.source == 'FILE' and (img.size[0] == 0 or not img.has_data):
                 try: img.reload()
                 except Exception: pass
-            
-            max_x = max((uv.x for uv in item['uvs'] if not math.isnan(uv.x)), default=1.0)
-            max_y = max((uv.y for uv in item['uvs'] if not math.isnan(uv.y)), default=1.0)
-            uv_w = min(25.0, max(1.0, math.ceil(max_x)))
-            uv_h = min(25.0, max(1.0, math.ceil(max_y)))
-            
-            if not crop:
-                uv_w = math.ceil(max_x)
-                uv_h = math.ceil(max_y)
-                
-            item['gfx']['uv_size'] = (uv_w, uv_h)
-            
-            w, h = img.size
-            item['gfx']['size'] = (int(w * uv_w + gaps), int(h * uv_h + gaps))
-            item['gfx']['img_or_color'] = img
-            entry_is_solid[mat] = False
+
+            if img.size[0] > 0 and img.size[1] > 0:
+                # Detect if the image is a solid color
+                if img.size[0] * img.size[1] <= 4096 * 4096:
+                    arr = np.empty(img.size[0] * img.size[1] * 4, dtype=np.float32)
+                    img.pixels.foreach_get(arr)
+                    arr_flat = arr.reshape(-1, 4)
+                    ptp = np.ptp(arr_flat, axis=0) # check variance across all 4 channels
+                    if np.all(ptp < 0.02):
+                        is_solid = True
+                        col = tuple(arr_flat[0])
+                    del arr
+                    del arr_flat
         else:
+            is_solid = True
             col = get_material_shader_color(mat)
+
+        if is_solid:
             item['gfx']['uv_size'] = (1.0, 1.0)
             item['gfx']['size'] = (int(diffuse_size + gaps), int(diffuse_size + gaps))
             item['gfx']['img_or_color'] = col
-            entry_is_solid[mat] = True
+            item['gfx']['is_solid'] = True
+        else:
+            # Calculate pixel dimensions for cropping/tiling
+            min_u, max_u, min_v, max_v = item['uv_bounds']
 
+            if not crop:
+                min_u = math.floor(min(0.0, min_u))
+                max_u = math.ceil(max(1.0, max_u))
+                min_v = math.floor(min(0.0, min_v))
+                max_v = math.ceil(max(1.0, max_v))
+                item['uv_bounds'] = (min_u, max_u, min_v, max_v)
+
+            w, h = img.size
+            if w <= 0 or h <= 0: w, h = 512, 512
+            
+            start_x = int(math.floor(min_u * w))
+            end_x = int(math.ceil(max_u * w))
+            start_y = int(math.floor(min_v * h))
+            end_y = int(math.ceil(max_v * h))
+
+            w_px = max(1, end_x - start_x)
+            h_px = max(1, end_y - start_y)
+
+            # Downsample if too large to prevent exploding atlas
+            step_x = 1
+            step_y = 1
+            MAX_ATLAS_DIM = 2048
+            if w_px > MAX_ATLAS_DIM:
+                step_x = int(math.ceil(w_px / MAX_ATLAS_DIM))
+                w_px = int(math.ceil(w_px / step_x))
+            if h_px > MAX_ATLAS_DIM:
+                step_y = int(math.ceil(h_px / MAX_ATLAS_DIM))
+                h_px = int(math.ceil(h_px / step_y))
+
+            item['gfx']['size'] = (int(w_px + gaps), int(h_px + gaps))
+            item['gfx']['img_or_color'] = img
+            item['gfx']['is_solid'] = False
+            item['gfx']['crop_data'] = (start_x, end_x, step_x, start_y, end_y, step_y)
+
+    # Step 4: Run SMC BinPacker
     def sort_key(kv):
         w, h = kv[1]['gfx']['size']
         return (max(w, h), w * h, w)
-    
+
     sorted_items = dict(sorted(structure.items(), key=sort_key, reverse=True))
-    
+
     packer = BinPacker(sorted_items)
     packed_bins = packer.fit()
 
@@ -324,16 +377,19 @@ def create_smc_atlas(target_col, custom_filepath=None, selected_mats=None, size_
         if item['gfx']['fit']:
             max_x = max(max_x, item['gfx']['fit']['x'] + item['gfx']['size'][0])
             max_y = max(max_y, item['gfx']['fit']['y'] + item['gfx']['size'][1])
-    
+
     raw_size = (int(max_x), int(max_y))
-    
+
     if size_mode == 'PO2':
-        atlas_size = (next_power_of_2(raw_size[0]), next_power_of_2(raw_size[1]))
+        atlas_size = (min(4096, max(64, next_power_of_2(raw_size[0]))),
+                      min(4096, max(64, next_power_of_2(raw_size[1]))))
     elif size_mode == 'QUAD':
-        atlas_size = (int(max(raw_size)), int(max(raw_size)))
+        sq = min(4096, max(64, next_power_of_2(max(raw_size))))
+        atlas_size = (sq, sq)
     else:
         atlas_size = raw_size
 
+    # Step 5: Draw Image Array
     atlas_arr = np.zeros((atlas_size[1], atlas_size[0], 4), dtype=np.float32)
     half_gaps = int(gaps / 2)
 
@@ -344,22 +400,28 @@ def create_smc_atlas(target_col, custom_filepath=None, selected_mats=None, size_
         w, h = item['gfx']['size']
         w -= gaps
         h -= gaps
+
+        is_solid = item['gfx']['is_solid']
         
-        img_or_col = item['gfx']['img_or_color']
-        if not entry_is_solid[mat]:
-            if img_or_col.size[0] > 0 and img_or_col.size[1] > 0:
-                arr = np.empty(img_or_col.size[0] * img_or_col.size[1] * 4, dtype=np.float32)
-                img_or_col.pixels.foreach_get(arr)
-                arr = arr.reshape((img_or_col.size[1], img_or_col.size[0], 4))
-                
-                tile_h = int(math.ceil(h / arr.shape[0]))
-                tile_w = int(math.ceil(w / arr.shape[1]))
-                tiled_arr = np.tile(arr, (tile_h, tile_w, 1))
-                tiled_arr = tiled_arr[:h, :w, :]
-                    
+        if not is_solid:
+            img = item['gfx']['img_or_color']
+            img_w, img_h = img.size
+            if img_w > 0 and img_h > 0:
+                arr = np.empty(img_w * img_h * 4, dtype=np.float32)
+                img.pixels.foreach_get(arr)
+                arr = arr.reshape((img_h, img_w, 4))
+
+                start_x, end_x, step_x, start_y, end_y, step_y = item['gfx']['crop_data']
+
+                x_indices = np.arange(start_x, end_x, step_x)[:w] % img_w
+                y_indices = np.arange(start_y, end_y, step_y)[:h] % img_h
+
+                xv, yv = np.meshgrid(x_indices, y_indices, sparse=False, indexing='xy')
+                tiled_arr = arr[yv, xv, :]
+
                 atlas_arr[y : y + h, x : x + w, :] = tiled_arr
         else:
-            col = img_or_col
+            col = item['gfx']['img_or_color']
             arr = np.tile(np.array(col, dtype=np.float32), (h, w, 1))
             atlas_arr[y : y + h, x : x + w, :] = arr
 
@@ -376,37 +438,10 @@ def create_smc_atlas(target_col, custom_filepath=None, selected_mats=None, size_
     new_img.save()
 
     new_mat = new_atlas_material(new_img, atlas_uv_name, f"{target_col.name}_Atlas_Mat", pixel_art=pixel_art)
-    
+
     atlas_w, atlas_h = atlas_size[0], atlas_size[1]
 
-    s_f = (raw_size[0]/atlas_size[0], raw_size[1]/atlas_size[1])
-    if s_f[0] <= 1 and s_f[1] <= 1: scaled_width, scaled_height = s_f
-    else:
-        aspect = (raw_size[0] * atlas_size[1]) / (max(1, raw_size[1]) * atlas_size[0])
-        scaled_width, scaled_height = (1.0, 1.0 / aspect) if aspect > 1 else (aspect, 1.0)
-
-    margin = gaps + (0 if pixel_art else 2)
-    border_margin = int(gaps / 2) + (0 if pixel_art else 1)
-
-    for mat, item in packed_bins.items():
-        if not item['gfx']['fit']: continue
-        w, h = item['gfx']['size']
-        gfx_width_margin = w - margin
-        gfx_height_margin = h - margin
-        uv_width, uv_height = item['gfx']['uv_size']
-        x_offset = item['gfx']['fit']['x'] + border_margin
-        y_offset = item['gfx']['fit']['y'] + border_margin
-        
-        for uv in item['uvs']:
-            reset_x = (uv.x / uv_width) * gfx_width_margin
-            reset_y = (uv.y / uv_height) * gfx_height_margin - h
-            
-            uv_x = (reset_x + x_offset) / max(1, raw_size[0])
-            uv_y = (reset_y - y_offset) / max(1, raw_size[1])
-            
-            uv.x = uv_x * scaled_width
-            uv.y = uv_y * scaled_height + 1.0
-
+    # Step 7: Remap mesh UVs
     for obj in participating_objs:
         new_uv_layer = obj.data.uv_layers.active.data
         for poly in obj.data.polygons:
@@ -418,31 +453,36 @@ def create_smc_atlas(target_col, custom_filepath=None, selected_mats=None, size_
                 w, h = item['gfx']['size']
                 w -= gaps
                 h -= gaps
-                uv_w, uv_h = item['gfx']['uv_size']
                 
-                is_solid = entry_is_solid[slot_mat]
-                
+                is_solid = item['gfx']['is_solid']
+                if not is_solid:
+                    min_u, max_u, min_v, max_v = item['uv_bounds']
+
                 for l in poly.loop_indices:
-                    uv_x = new_uv_layer[l].uv.x
-                    uv_y = new_uv_layer[l].uv.y
-                    
+                    orig_x = new_uv_layer[l].uv.x
+                    orig_y = new_uv_layer[l].uv.y
+
                     if is_solid:
-                        # Scales down the geometry shape inside the safe center of the solid block
-                        # This PRESERVES the UV Area > 0, which prevents the dark matte shading failure!
-                        scale_fac = 0.05
-                        new_uv_layer[l].uv.x = (x + (w * 0.5) + (uv_x * scale_fac)) / atlas_w
-                        new_uv_layer[l].uv.y = (y + (h * 0.5) + (uv_y * scale_fac)) / atlas_h
+                        new_uv_layer[l].uv.x = (x + w * 0.5) / atlas_w
+                        new_uv_layer[l].uv.y = (y + h * 0.5) / atlas_h
                     else:
                         margin = 0 if pixel_art else 1.0
                         clamped_w = max(1.0, w - margin * 2.0)
                         clamped_h = max(1.0, h - margin * 2.0)
-                        
-                        mapped_x = (uv_x / uv_w) * clamped_w + margin
-                        mapped_y = (uv_y / uv_h) * clamped_h + margin
-                        
+
+                        norm_u = (orig_x - min_u) / max(0.001, (max_u - min_u))
+                        norm_v = (orig_y - min_v) / max(0.001, (max_v - min_v))
+
+                        norm_u = max(0.0, min(1.0, norm_u))
+                        norm_v = max(0.0, min(1.0, norm_v))
+
+                        mapped_x = norm_u * clamped_w + margin
+                        mapped_y = norm_v * clamped_h + margin
+
                         new_uv_layer[l].uv.x = (x + mapped_x) / atlas_w
                         new_uv_layer[l].uv.y = (y + mapped_y) / atlas_h
 
+    # Step 8: Safe in-place slot reassignment
     for obj in participating_objs:
         original_slots = [slot.material for slot in obj.material_slots]
         obj_all_selected = all((m in selected_mats) for m in original_slots if m)
@@ -463,14 +503,23 @@ def create_smc_atlas(target_col, custom_filepath=None, selected_mats=None, size_
             for idx_u, m in enumerate(unselected_unique, start=1):
                 mat_to_idx[m] = idx_u
 
+            poly_new_indices = []
             for poly in obj.data.polygons:
                 orig_m = original_slots[poly.material_index] if poly.material_index < len(original_slots) else None
-                poly.material_index = mat_to_idx.get(orig_m, 0)
+                if orig_m in selected_mats:
+                    poly_new_indices.append(0)
+                elif orig_m in mat_to_idx:
+                    poly_new_indices.append(mat_to_idx[orig_m])
+                else:
+                    poly_new_indices.append(0)
 
             obj.data.materials.clear()
             obj.data.materials.append(new_mat)
             for m in unselected_unique:
                 obj.data.materials.append(m)
+
+            for poly, new_idx in zip(obj.data.polygons, poly_new_indices):
+                poly.material_index = new_idx
 
         obj.data.uv_layers[atlas_uv_name].active_render = True
         obj.data.uv_layers.active = obj.data.uv_layers[atlas_uv_name]
@@ -565,6 +614,7 @@ def make_bake_material(original, original_uv, target_image):
 
 
 def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atlas_size=2048, bake_margin=12, uv_margin=0.012):
+    import bmesh
     mesh_objs = [o for o in target_col.all_objects if o.type == 'MESH']
     participating_objs = [o for o in mesh_objs if {s.material for s in o.material_slots if s.material}.intersection(set(selected_mats))]
 
@@ -584,9 +634,11 @@ def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atla
 
     try:
         orig_uv_names = {}
+        original_slots_map = {}
         for obj in participating_objs:
             orig_uv = source_uv_name(obj)
             orig_uv_names[obj] = orig_uv
+            original_slots_map[obj] = [slot.material for slot in obj.material_slots]
 
             if atlas_uv_name in obj.data.uv_layers:
                 obj.data.uv_layers.remove(obj.data.uv_layers[atlas_uv_name])
@@ -595,18 +647,31 @@ def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atla
 
         for o in bpy.context.selected_objects:
             o.select_set(False)
+
+        for obj in participating_objs:
+            bpy.context.view_layer.objects.active = obj
+            obj.select_set(True)
+            bpy.ops.object.mode_set(mode='EDIT')
+            
+            bpy.context.tool_settings.mesh_select_mode = (False, False, True)
+            
+            bm = bmesh.from_edit_mesh(obj.data)
+            for v in bm.verts: v.select = False
+            for e in bm.edges: e.select = False
+            for f in bm.faces: f.select = False
+            
+            orig_mats = original_slots_map[obj]
+            for f in bm.faces:
+                slot_m = orig_mats[f.material_index] if f.material_index < len(orig_mats) else None
+                if slot_m and slot_m in selected_mats:
+                    f.select = True
+            
+            bmesh.update_edit_mesh(obj.data)
+            bpy.ops.object.mode_set(mode='OBJECT')
+
         for o in participating_objs:
             o.select_set(True)
         bpy.context.view_layer.objects.active = participating_objs[0]
-
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='DESELECT')
-        bpy.ops.object.mode_set(mode='OBJECT')
-
-        for obj in participating_objs:
-            for poly in obj.data.polygons:
-                slot = obj.material_slots[poly.material_index] if poly.material_index < len(obj.material_slots) else None
-                poly.select = bool(slot and slot.material in selected_mats)
 
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.uv.smart_project(
@@ -622,9 +687,11 @@ def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atla
             orig_uv = orig_uv_names[obj]
             orig_uv_data = obj.data.uv_layers[orig_uv].data
             atlas_uv_data = obj.data.uv_layers[atlas_uv_name].data
+            orig_mats = original_slots_map[obj]
+            
             for poly in obj.data.polygons:
-                slot = obj.material_slots[poly.material_index] if poly.material_index < len(obj.material_slots) else None
-                if not (slot and slot.material in selected_mats):
+                slot_m = orig_mats[poly.material_index] if poly.material_index < len(orig_mats) else None
+                if not (slot_m and slot_m in selected_mats):
                     for l_idx in poly.loop_indices:
                         atlas_uv_data[l_idx].uv = (orig_uv_data[l_idx].uv[0] + 100.0, orig_uv_data[l_idx].uv[1])
 
@@ -635,10 +702,8 @@ def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atla
         new_img.colorspace_settings.name = 'sRGB'
 
         cache = {}
-        original_slots_map = {}
         for obj in participating_objs:
             orig_uv = orig_uv_names[obj]
-            original_slots_map[obj] = [slot.material for slot in obj.material_slots]
             for slot in obj.material_slots:
                 original = slot.material
                 slot.link = 'DATA'
@@ -682,10 +747,10 @@ def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atla
         new_mat = new_atlas_material(new_img, atlas_uv_name, f"{target_col.name}_Atlas_Mat")
 
         for obj in participating_objs:
+            orig_mats = original_slots_map[obj]
             orig_uv = orig_uv_names[obj]
             orig_uv_data = obj.data.uv_layers[orig_uv].data
             atlas_uv_data = obj.data.uv_layers[atlas_uv_name].data
-            orig_mats = original_slots_map[obj]
 
             for poly in obj.data.polygons:
                 slot_m = orig_mats[poly.material_index] if poly.material_index < len(orig_mats) else None
@@ -693,38 +758,29 @@ def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atla
                     for l_idx in poly.loop_indices:
                         atlas_uv_data[l_idx].uv = orig_uv_data[l_idx].uv
 
-            obj_all_selected = all((m in selected_mats) for m in orig_mats if m)
+            unselected_to_keep = [m for m in orig_mats if m and m not in selected_mats]
+            new_slots = [new_mat] + unselected_to_keep
 
-            if obj_all_selected:
-                obj.data.materials.clear()
-                obj.data.materials.append(new_mat)
-                for poly in obj.data.polygons:
-                    poly.material_index = 0
-            else:
-                unselected_unique = []
-                seen_unsel = set()
-                for m in orig_mats:
-                    if m and m not in selected_mats and m not in seen_unsel:
-                        seen_unsel.add(m)
-                        unselected_unique.append(m)
+            mat_to_idx = {m: 0 for m in selected_mats}
+            for i, m in enumerate(unselected_to_keep, start=1):
+                mat_to_idx[m] = i
 
-                mat_to_idx = {m: 0 for m in selected_mats}
-                for idx_u, m in enumerate(unselected_unique, start=1):
-                    mat_to_idx[m] = idx_u
+            poly_target_indices = []
+            for poly in obj.data.polygons:
+                old_m = orig_mats[poly.material_index] if poly.material_index < len(orig_mats) else None
+                poly_target_indices.append(mat_to_idx.get(old_m, 0))
 
-                for poly in obj.data.polygons:
-                    orig_m = orig_mats[poly.material_index] if poly.material_index < len(orig_mats) else None
-                    poly.material_index = mat_to_idx.get(orig_m, 0)
+            obj.data.materials.clear()
+            for m in new_slots:
+                obj.data.materials.append(m)
 
-                obj.data.materials.clear()
-                obj.data.materials.append(new_mat)
-                for m in unselected_unique:
-                    obj.data.materials.append(m)
+            for poly, target_idx in zip(obj.data.polygons, poly_target_indices):
+                poly.material_index = target_idx
 
             obj.data.uv_layers[atlas_uv_name].active_render = True
             obj.data.uv_layers.active = obj.data.uv_layers[atlas_uv_name]
 
-        popup(f"Baked {atlas_size}x{atlas_size} atlas on {len(participating_objs)} meshes! PNG: {filepath}")
+        popup(f"Baked {atlas_size}x{atlas_size} atlas on {len(participating_objs)} meshes! Saved: {filepath}")
         return participating_objs, filepath
 
     finally:
@@ -744,7 +800,7 @@ def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atla
 
 
 # ==============================================================================
-# MAIN OPERATOR (With File Browser ExportHelper Dialog)
+# MAIN OPERATOR
 # ==============================================================================
 
 class SOURCEOPS_OT_CombineTextures(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):

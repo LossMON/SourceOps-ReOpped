@@ -71,8 +71,19 @@ class SOURCEOPS_GlobalProps(bpy.types.PropertyGroup):
             ('QUAD', 'Quadratic', 'Square Power of 2 (Auto fit up to 4K)'),
             ('PO2', 'Power of 2', 'Power of 2 (Auto fit up to 4K)'),
             ('AUTO', 'Automatic', 'Minimal size fitting textures'),
+            ('CUSTOM', 'Custom Size', 'Specify an exact custom resolution'),
         ],
-        default='2048',
+        default='AUTO',
+    )
+    combiner_custom_width: bpy.props.IntProperty(
+        name='Custom Width',
+        description='Custom atlas width in pixels',
+        default=1024, min=16, max=8192
+    )
+    combiner_custom_height: bpy.props.IntProperty(
+        name='Custom Height',
+        description='Custom atlas height in pixels',
+        default=1024, min=16, max=8192
     )
     combiner_bake_margin: bpy.props.IntProperty(
         name='Margin (px)',
@@ -115,20 +126,20 @@ class SOURCEOPS_GlobalProps(bpy.types.PropertyGroup):
     )
 
     panel: bpy.props.EnumProperty(
-        name='Panel',
-        description='Which panel to display',
-        items=[
-            ('GAMES', 'Games', 'Display the games panel', 'PREFERENCES', 1),
-            ('MODELS', 'Models', 'Display the models panel', 'MESH_CUBE', 2),
-            ('MODEL_OPTIONS', 'Model Options', 'Display the model options panel', 'MODIFIER', 3),
-            ('TEXTURES', 'Textures', 'Display the textures panel', 'TEXTURE', 4),
-            ('SEQUENCES', 'Sequences', 'Display the sequences panel', 'SEQUENCE', 5),
-            ('EVENTS', 'Events', 'Display the events panel', 'ACTION', 6),
-            ('ATTACHMENTS', 'Attachments', 'Display the attachments panel', 'BONE_DATA', 7),
-            ('PARTICLES', 'Particles', 'Display the particles panel', 'PARTICLES', 8),
-            ('MAPS', 'Maps', 'Display the maps panel', 'MOD_BUILD', 9),
-            ('SIMULATION', 'Simulation', 'Display the simulation panel', 'PHYSICS', 10),
-            ('MISC', 'Misc', 'Display the misc panel', 'MONKEY', 11),
-            ('TEXTURE_COMBINER', 'Texture Combiner', 'Display the texture combiner panel', 'IMAGE', 12),
-        ],
-    )
+            name='Panel',
+            description='Which panel to display',
+            items=[
+                ('GAMES', 'Games', 'Display the games panel', 'PREFERENCES', 1),
+                ('MODELS', 'Models', 'Display the models panel', 'MESH_CUBE', 2),
+                ('MODEL_OPTIONS', 'Model Options', 'Display the model options panel', 'MODIFIER', 3),
+                ('TEXTURES', 'Textures', 'Display the textures panel', 'TEXTURE', 4),
+                ('SEQUENCES', 'Sequences', 'Display the sequences panel', 'SEQUENCE', 5),
+                ('EVENTS', 'Events', 'Display the events panel', 'ACTION', 6),
+                ('ATTACHMENTS', 'Attachments', 'Display the attachments panel', 'BONE_DATA', 7),
+                ('PARTICLES', 'Particles', 'Display the particles panel', 'PARTICLES', 8),
+                ('MAPS', 'Maps', 'Display the maps panel', 'MOD_BUILD', 9),
+                ('SIMULATION', 'Simulation', 'Display the simulation panel', 'PHYSICS', 10),
+                ('MISC', 'Misc', 'Display the misc panel', 'MONKEY', 11),
+                ('TEXTURE_COMBINER', 'Texture Combiner', 'Display the texture combiner panel', 'IMAGE', 12),
+            ],
+        )

@@ -1,0 +1,890 @@
+﻿import bpy
+import bpy_extras
+import os
+import re
+import math
+import traceback
+import numpy as np
+
+LOG_PREFIX = '[TEXTURE COMBINER] '
+TEMP_MATERIAL_PREFIX = '__SourceOps_Bake__'
+
+
+def log(*items):
+    print(LOG_PREFIX + ' '.join(str(v) for v in items), flush=True)
+
+
+def popup(message, *, error=False):
+    log(('ERROR: ' if error else 'SUCCESS: ') + message)
+    try:
+        lines = [message[i:i+95] for i in range(0, len(message), 95)]
+        def draw(self, context):
+            for line in lines[:7]:
+                self.layout.label(text=line)
+        bpy.context.window_manager.popup_menu(
+            draw, title='Texture Combiner — ' + ('Error' if error else 'Done'),
+            icon='ERROR' if error else 'CHECKMARK')
+    except Exception:
+        pass
+
+
+def source_uv_name(obj):
+    uvs = obj.data.uv_layers
+    if not uvs:
+        uv = obj.data.uv_layers.new(name='UVMap')
+        return uv.name
+    chosen = next((u for u in uvs if u.active_render), None) or uvs.active
+    return chosen.name
+
+
+def unused_png_path(name, w, h):
+    stem = re.sub(r'[^a-zA-Z0-9_.-]+', '_', name).strip('._') or 'Atlas'
+    folder = os.path.dirname(bpy.data.filepath) if bpy.data.filepath else bpy.app.tempdir
+    candidate = os.path.join(folder, f"{stem}_ATLAS_{w}x{h}.png")
+    i = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(folder, f"{stem}_ATLAS_{w}x{h}_{i:02d}.png")
+        i += 1
+    return candidate
+
+
+def new_atlas_material(image, uv_name, name, pixel_art=False):
+    mat = bpy.data.materials.new(name=name)
+    mat.use_nodes = True
+    tree = mat.node_tree
+    tree.nodes.clear()
+    out = tree.nodes.new('ShaderNodeOutputMaterial')
+    out.location = (500, 100)
+    shader = tree.nodes.new('ShaderNodeBsdfPrincipled')
+    shader.location = (230, 100)
+    if 'Metallic' in shader.inputs:
+        shader.inputs['Metallic'].default_value = 0
+    if 'Roughness' in shader.inputs:
+        shader.inputs['Roughness'].default_value = 0.5
+    img = tree.nodes.new('ShaderNodeTexImage')
+    img.location = (-50, 100)
+    img.image = image
+    img.interpolation = 'Closest' if pixel_art else 'Linear'
+    uv = tree.nodes.new('ShaderNodeUVMap')
+    uv.location = (-270, 100)
+    uv.uv_map = uv_name
+    tree.links.new(uv.outputs['UV'], img.inputs['Vector'])
+    tree.links.new(img.outputs['Color'], shader.inputs['Base Color'])
+    tree.links.new(shader.outputs['BSDF'], out.inputs['Surface'])
+    return mat
+
+
+# ==============================================================================
+# METHOD 1: SMC 2D DIRECT PACKING (Quadratic, Power of 2, Automatic)
+# ==============================================================================
+
+class BinPacker(object):
+    def __init__(self, images):
+        self.root = {}
+        self.bin = images
+
+    def fit(self):
+        self.root = {'x': 0, 'y': 0, 'w': 0, 'h': 0}
+        if not self.bin:
+            return self.bin
+        self.root['w'], self.root['h'] = next(iter(self.bin.values()))['gfx']['size']
+        for img in self.bin.values():
+            w, h = img['gfx']['size']
+            node = self.find_node(self.root, w, h)
+            img['gfx']['fit'] = self.split_node(node, w, h) if node else self.grow_node(w, h)
+        return self.bin
+
+    def find_node(self, root, w, h):
+        if 'used' in root and root['used']:
+            return self.find_node(root['right'], w, h) or self.find_node(root['down'], w, h)
+        elif w <= root['w'] and h <= root['h']:
+            return root
+        return None
+
+    def split_node(self, node, w, h):
+        node['used'] = True
+        node['down'] = {'x': node['x'], 'y': node['y'] + h, 'w': node['w'], 'h': node['h'] - h}
+        node['right'] = {'x': node['x'] + w, 'y': node['y'], 'w': node['w'] - w, 'h': h}
+        return node
+
+    def grow_node(self, w, h):
+        can_grow_right = h <= self.root['h']
+        can_grow_down = w <= self.root['w']
+        should_grow_right = can_grow_right and self.root['h'] >= self.root['w'] + w
+        should_grow_down = can_grow_down and self.root['w'] >= self.root['h'] + h
+
+        if should_grow_right or not should_grow_down and can_grow_right:
+            return self.grow_right(w, h)
+        elif should_grow_down or can_grow_down:
+            return self.grow_down(w, h)
+        return None
+
+    def grow_right(self, w, h):
+        self.root = {
+            'used': True,
+            'x': 0,
+            'y': 0,
+            'w': self.root['w'] + w,
+            'h': self.root['h'],
+            'down': self.root,
+            'right': {'x': self.root['w'], 'y': 0, 'w': w, 'h': self.root['h']}
+        }
+        node = self.find_node(self.root, w, h)
+        return self.split_node(node, w, h) if node else None
+
+    def grow_down(self, w, h):
+        self.root = {
+            'used': True,
+            'x': 0,
+            'y': 0,
+            'w': self.root['w'],
+            'h': self.root['h'] + h,
+            'down': {'x': 0, 'y': self.root['h'], 'w': self.root['w'], 'h': h},
+            'right': self.root
+        }
+        node = self.find_node(self.root, w, h)
+        return self.split_node(node, w, h) if node else None
+
+
+def get_material_shader_image(mat):
+    if not mat or not mat.use_nodes or not mat.node_tree:
+        return None
+    nodes = mat.node_tree.nodes
+    output = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output), None)
+    if output is None:
+        output = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL'), None)
+
+    shader_node = None
+    if output and output.inputs.get('Surface') and output.inputs['Surface'].is_linked:
+        shader_node = output.inputs['Surface'].links[0].from_node
+
+    if not shader_node or shader_node.type not in {'BSDF_PRINCIPLED', 'BSDF_DIFFUSE', 'EMISSION'}:
+        shader_node = next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)
+        if not shader_node:
+            shader_node = next((n for n in nodes if n.type in {'BSDF_DIFFUSE', 'EMISSION'}), None)
+
+    if shader_node:
+        sock_name = 'Base Color' if shader_node.type == 'BSDF_PRINCIPLED' else 'Color'
+        sock = shader_node.inputs.get(sock_name)
+        if sock and sock.is_linked:
+            from_node = sock.links[0].from_node
+            if from_node.type == 'TEX_IMAGE' and from_node.image:
+                return from_node.image
+            if from_node.type in {'MIX', 'MIX_RGB'}:
+                for inp in from_node.inputs:
+                    if inp.is_linked and inp.links[0].from_node.type == 'TEX_IMAGE' and inp.links[0].from_node.image:
+                        return inp.links[0].from_node.image
+
+    normal_images = set()
+    for n in nodes:
+        if n.type in {'NORMAL_MAP', 'BUMP'}:
+            for inp in n.inputs:
+                if inp.is_linked and inp.links[0].from_node.type == 'TEX_IMAGE' and inp.links[0].from_node.image:
+                    normal_images.add(inp.links[0].from_node.image)
+
+    for n in nodes:
+        if n.type == 'TEX_IMAGE' and n.image and n.image not in normal_images:
+            return n.image
+    return None
+
+
+def linear_to_srgb(c):
+    if c < 0.0: return 0.0
+    elif c < 0.0031308: return c * 12.92
+    else: return 1.055 * math.pow(c, 1.0 / 2.4) - 0.055
+
+
+def get_material_shader_color(mat):
+    c = None
+    if mat and mat.use_nodes and mat.node_tree:
+        for n in mat.node_tree.nodes:
+            if n.type == 'BSDF_PRINCIPLED':
+                sock = n.inputs.get('Base Color')
+                if sock and not sock.is_linked: c = sock.default_value
+                elif sock and sock.is_linked and sock.links[0].from_node.type == 'RGB': c = sock.links[0].from_node.outputs[0].default_value
+                if c: break
+        if not c:
+            for n in mat.node_tree.nodes:
+                if n.type == 'BSDF_DIFFUSE':
+                    sock = n.inputs.get('Color')
+                    if sock and not sock.is_linked: c = sock.default_value
+                    elif sock and sock.is_linked and sock.links[0].from_node.type == 'RGB': c = sock.links[0].from_node.outputs[0].default_value
+                    if c: break
+        if not c:
+            for n in mat.node_tree.nodes:
+                if n.type == 'EMISSION':
+                    sock = n.inputs.get('Color')
+                    if sock and not sock.is_linked:
+                        c = sock.default_value
+                        break
+        if not c:
+            for n in mat.node_tree.nodes:
+                if n.type == 'GROUP' and n.node_tree:
+                    if 'mmd_shader' in mat.node_tree.nodes:
+                        c = mat.node_tree.nodes['mmd_shader'].inputs['Diffuse Color'].default_value
+                    elif 'Diffuse' in n.inputs:
+                        c = n.inputs['Diffuse'].default_value
+                    if c: break
+        if not c:
+            for n in mat.node_tree.nodes:
+                if n.type == 'RGB':
+                    c = n.outputs[0].default_value
+                    break
+    if not c and hasattr(mat, 'diffuse_color'):
+        c = mat.diffuse_color
+    
+    if not c: return (0.8, 0.8, 0.8, 1.0)
+    
+    return (linear_to_srgb(float(c[0])), linear_to_srgb(float(c[1])), linear_to_srgb(float(c[2])), float(c[3]) if len(c) > 3 else 1.0)
+
+
+def next_power_of_2(x):
+    return 1 if x <= 1 else 2 ** int(math.ceil(math.log2(x)))
+
+
+def create_smc_atlas(target_col, custom_filepath=None, selected_mats=None, size_mode='QUAD', crop=True, pixel_art=False, diffuse_size=32, gaps=0):
+    mesh_objs = [o for o in target_col.all_objects if o.type == 'MESH']
+    participating_objs = [o for o in mesh_objs if {s.material for s in o.material_slots if s.material}.intersection(set(selected_mats))]
+
+    log(f'Running SMC 2D Packing ({size_mode}) on {len(participating_objs)} separate meshes...')
+
+    atlas_uv_name = 'Atlas_UV'
+
+    for obj in participating_objs:
+        orig_uv = next((u for u in obj.data.uv_layers if u.active_render), None) or obj.data.uv_layers.active
+        if not orig_uv: orig_uv = obj.data.uv_layers.new(name='UVMap')
+        if atlas_uv_name in obj.data.uv_layers: obj.data.uv_layers.remove(obj.data.uv_layers[atlas_uv_name])
+        new_uv = obj.data.uv_layers.new(name=atlas_uv_name)
+        for i, d in enumerate(orig_uv.data): new_uv.data[i].uv = d.uv
+        obj.data.uv_layers.active = new_uv
+
+    structure = {}
+    for mat in selected_mats:
+        structure[mat] = {'uvs': [], 'gfx': {}}
+
+    for obj in participating_objs:
+        new_uv_layer = obj.data.uv_layers.active.data
+        
+        mat_uv_bounds = {}
+        for poly in obj.data.polygons:
+            slot_mat = obj.material_slots[poly.material_index].material if poly.material_index < len(obj.material_slots) else None
+            if slot_mat in selected_mats:
+                if slot_mat not in mat_uv_bounds:
+                    mat_uv_bounds[slot_mat] = {'min_x': float('inf'), 'min_y': float('inf')}
+                for l in poly.loop_indices:
+                    uv = new_uv_layer[l].uv
+                    if not math.isnan(uv.x) and uv.x < mat_uv_bounds[slot_mat]['min_x']: mat_uv_bounds[slot_mat]['min_x'] = uv.x
+                    if not math.isnan(uv.y) and uv.y < mat_uv_bounds[slot_mat]['min_y']: mat_uv_bounds[slot_mat]['min_y'] = uv.y
+
+        for poly in obj.data.polygons:
+            slot_mat = obj.material_slots[poly.material_index].material if poly.material_index < len(obj.material_slots) else None
+            if slot_mat in selected_mats:
+                shift_x = math.floor(mat_uv_bounds[slot_mat]['min_x']) if mat_uv_bounds[slot_mat]['min_x'] != float('inf') else 0
+                shift_y = math.floor(mat_uv_bounds[slot_mat]['min_y']) if mat_uv_bounds[slot_mat]['min_y'] != float('inf') else 0
+                
+                if shift_x != 0 or shift_y != 0:
+                    for l in poly.loop_indices:
+                        new_uv_layer[l].uv.x -= shift_x
+                        new_uv_layer[l].uv.y -= shift_y
+                
+                for l in poly.loop_indices:
+                    structure[slot_mat]['uvs'].append(new_uv_layer[l].uv)
+
+    entry_is_solid = {}
+
+    for mat, item in structure.items():
+        img = get_material_shader_image(mat)
+        if img:
+            if img.source == 'FILE' and (img.size[0] == 0 or not img.has_data):
+                try: img.reload()
+                except Exception: pass
+            
+            max_x = max((uv.x for uv in item['uvs'] if not math.isnan(uv.x)), default=1.0)
+            max_y = max((uv.y for uv in item['uvs'] if not math.isnan(uv.y)), default=1.0)
+            uv_w = min(25.0, max(1.0, math.ceil(max_x)))
+            uv_h = min(25.0, max(1.0, math.ceil(max_y)))
+            
+            if not crop:
+                uv_w = math.ceil(max_x)
+                uv_h = math.ceil(max_y)
+                
+            item['gfx']['uv_size'] = (uv_w, uv_h)
+            
+            w, h = img.size
+            item['gfx']['size'] = (int(w * uv_w + gaps), int(h * uv_h + gaps))
+            item['gfx']['img_or_color'] = img
+            entry_is_solid[mat] = False
+        else:
+            col = get_material_shader_color(mat)
+            item['gfx']['uv_size'] = (1.0, 1.0)
+            item['gfx']['size'] = (int(diffuse_size + gaps), int(diffuse_size + gaps))
+            item['gfx']['img_or_color'] = col
+            entry_is_solid[mat] = True
+
+    def sort_key(kv):
+        w, h = kv[1]['gfx']['size']
+        return (max(w, h), w * h, w)
+    
+    sorted_items = dict(sorted(structure.items(), key=sort_key, reverse=True))
+    
+    packer = BinPacker(sorted_items)
+    packed_bins = packer.fit()
+
+    max_x, max_y = 1, 1
+    for item in packed_bins.values():
+        if item['gfx']['fit']:
+            max_x = max(max_x, item['gfx']['fit']['x'] + item['gfx']['size'][0])
+            max_y = max(max_y, item['gfx']['fit']['y'] + item['gfx']['size'][1])
+    
+    raw_size = (int(max_x), int(max_y))
+    
+    if size_mode == 'PO2':
+        atlas_size = (next_power_of_2(raw_size[0]), next_power_of_2(raw_size[1]))
+    elif size_mode == 'QUAD':
+        atlas_size = (int(max(raw_size)), int(max(raw_size)))
+    else:
+        atlas_size = raw_size
+
+    atlas_arr = np.zeros((atlas_size[1], atlas_size[0], 4), dtype=np.float32)
+    half_gaps = int(gaps / 2)
+
+    for mat, item in packed_bins.items():
+        if not item['gfx']['fit']: continue
+        x = item['gfx']['fit']['x'] + half_gaps
+        y = item['gfx']['fit']['y'] + half_gaps
+        w, h = item['gfx']['size']
+        w -= gaps
+        h -= gaps
+        
+        img_or_col = item['gfx']['img_or_color']
+        if not entry_is_solid[mat]:
+            if img_or_col.size[0] > 0 and img_or_col.size[1] > 0:
+                arr = np.empty(img_or_col.size[0] * img_or_col.size[1] * 4, dtype=np.float32)
+                img_or_col.pixels.foreach_get(arr)
+                arr = arr.reshape((img_or_col.size[1], img_or_col.size[0], 4))
+                
+                tile_h = int(math.ceil(h / arr.shape[0]))
+                tile_w = int(math.ceil(w / arr.shape[1]))
+                tiled_arr = np.tile(arr, (tile_h, tile_w, 1))
+                tiled_arr = tiled_arr[:h, :w, :]
+                    
+                atlas_arr[y : y + h, x : x + w, :] = tiled_arr
+        else:
+            col = img_or_col
+            arr = np.tile(np.array(col, dtype=np.float32), (h, w, 1))
+            atlas_arr[y : y + h, x : x + w, :] = arr
+
+    filepath = custom_filepath if custom_filepath else unused_png_path(target_col.name, atlas_size[0], atlas_size[1])
+
+    new_img = bpy.data.images.new(
+        name=f"{target_col.name}_ATLAS_{atlas_size[0]}x{atlas_size[1]}",
+        width=atlas_size[0], height=atlas_size[1],
+        alpha=True, float_buffer=False)
+    new_img.colorspace_settings.name = 'sRGB'
+    new_img.pixels.foreach_set(atlas_arr.ravel())
+    new_img.filepath_raw = filepath
+    new_img.file_format = 'PNG'
+    new_img.save()
+
+    new_mat = new_atlas_material(new_img, atlas_uv_name, f"{target_col.name}_Atlas_Mat", pixel_art=pixel_art)
+    
+    atlas_w, atlas_h = atlas_size[0], atlas_size[1]
+
+    s_f = (raw_size[0]/atlas_size[0], raw_size[1]/atlas_size[1])
+    if s_f[0] <= 1 and s_f[1] <= 1: scaled_width, scaled_height = s_f
+    else:
+        aspect = (raw_size[0] * atlas_size[1]) / (max(1, raw_size[1]) * atlas_size[0])
+        scaled_width, scaled_height = (1.0, 1.0 / aspect) if aspect > 1 else (aspect, 1.0)
+
+    margin = gaps + (0 if pixel_art else 2)
+    border_margin = int(gaps / 2) + (0 if pixel_art else 1)
+
+    for mat, item in packed_bins.items():
+        if not item['gfx']['fit']: continue
+        w, h = item['gfx']['size']
+        gfx_width_margin = w - margin
+        gfx_height_margin = h - margin
+        uv_width, uv_height = item['gfx']['uv_size']
+        x_offset = item['gfx']['fit']['x'] + border_margin
+        y_offset = item['gfx']['fit']['y'] + border_margin
+        
+        for uv in item['uvs']:
+            reset_x = (uv.x / uv_width) * gfx_width_margin
+            reset_y = (uv.y / uv_height) * gfx_height_margin - h
+            
+            uv_x = (reset_x + x_offset) / max(1, raw_size[0])
+            uv_y = (reset_y - y_offset) / max(1, raw_size[1])
+            
+            uv.x = uv_x * scaled_width
+            uv.y = uv_y * scaled_height + 1.0
+
+    for obj in participating_objs:
+        original_slots = [slot.material for slot in obj.material_slots]
+        
+        unselected_unique = []
+        seen_unsel = set()
+        for m in original_slots:
+            if m and m not in selected_mats and m not in seen_unsel:
+                seen_unsel.add(m)
+                unselected_unique.append(m)
+
+        mat_to_idx = {m: 0 for m in selected_mats}
+        for idx_u, m in enumerate(unselected_unique, start=1):
+            mat_to_idx[m] = idx_u
+
+        poly_new_indices = []
+        for poly in obj.data.polygons:
+            orig_m = original_slots[poly.material_index] if poly.material_index < len(original_slots) else None
+            if orig_m in selected_mats:
+                poly_new_indices.append(0)
+            elif orig_m in mat_to_idx:
+                poly_new_indices.append(mat_to_idx[orig_m])
+            else:
+                poly_new_indices.append(0)
+
+        obj.data.materials.clear()
+        obj.data.materials.append(new_mat)
+        for m in unselected_unique:
+            obj.data.materials.append(m)
+
+        for poly, new_idx in zip(obj.data.polygons, poly_new_indices):
+            poly.material_index = new_idx
+
+        obj.data.uv_layers[atlas_uv_name].active_render = True
+        obj.data.uv_layers.active = obj.data.uv_layers[atlas_uv_name]
+
+    popup(f"Packed {size_mode} atlas on {len(participating_objs)} separate meshes! PNG: {filepath}")
+    return participating_objs, filepath
+
+
+# ==============================================================================
+# METHOD 2: STANDARD CYCLES BAKE (2048, 512, 1024, 4096)
+# ==============================================================================
+
+def get_main_color_input(mat):
+    if not mat or not mat.node_tree:
+        return None
+    nodes = mat.node_tree.nodes
+    output = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output), None)
+    if output is None:
+        output = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL'), None)
+    shader = None
+    if output and output.inputs.get('Surface') and output.inputs['Surface'].is_linked:
+        shader = output.inputs['Surface'].links[0].from_node
+    if shader:
+        if shader.type == 'BSDF_PRINCIPLED':
+            return shader.inputs.get('Base Color')
+        if shader.type in {'BSDF_DIFFUSE', 'EMISSION'}:
+            return shader.inputs.get('Color')
+    for node_type, socket_name in (
+        ('BSDF_PRINCIPLED', 'Base Color'),
+        ('BSDF_DIFFUSE', 'Color'),
+        ('EMISSION', 'Color'),
+    ):
+        candidates = [n for n in nodes if n.type == node_type]
+        if len(candidates) == 1:
+            return candidates[0].inputs.get(socket_name)
+    return None
+
+
+def force_source_uvs(nodes, links, uv_name):
+    for node in list(nodes):
+        if node.type == 'UVMAP' and not node.uv_map:
+            node.uv_map = uv_name
+        if node.type == 'TEX_COORD':
+            uv_socket = node.outputs.get('UV')
+            if uv_socket and uv_socket.is_linked:
+                explicit = nodes.new('ShaderNodeUVMap')
+                explicit.uv_map = uv_name
+                for link in list(uv_socket.links):
+                    links.new(explicit.outputs['UV'], link.to_socket)
+        if node.type == 'TEX_IMAGE':
+            vector = node.inputs.get('Vector')
+            if vector and not vector.is_linked:
+                explicit = nodes.new('ShaderNodeUVMap')
+                explicit.uv_map = uv_name
+                links.new(explicit.outputs['UV'], vector)
+
+
+def make_bake_material(original, original_uv, target_image):
+    was_node_material = original.use_nodes
+    mat = original.copy()
+    mat.name = TEMP_MATERIAL_PREFIX + original.name
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    force_source_uvs(nodes, links, original_uv)
+
+    base = get_main_color_input(mat)
+    emitter = nodes.new('ShaderNodeEmission')
+    emitter.name = 'Atlas_Emitter'
+    emitter.inputs['Strength'].default_value = 1.0
+
+    if not was_node_material or base is None:
+        emitter.inputs['Color'].default_value = tuple(getattr(original, 'diffuse_color', (0.8, 0.8, 0.8, 1.0)))
+    elif base.is_linked:
+        links.new(base.links[0].from_socket, emitter.inputs['Color'])
+    else:
+        emitter.inputs['Color'].default_value = tuple(base.default_value)
+
+    output = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output), None)
+    if not output:
+        output = nodes.new('ShaderNodeOutputMaterial')
+    links.new(emitter.outputs['Emission'], output.inputs['Surface'])
+
+    target = nodes.new('ShaderNodeTexImage')
+    target.name = 'Atlas_Bake_Target'
+    target.image = target_image
+    for node in nodes:
+        node.select = False
+    target.select = True
+    nodes.active = target
+    return mat
+
+
+def create_bake_atlas(target_col, custom_filepath=None, selected_mats=None, atlas_size=2048, bake_margin=12, uv_margin=0.012):
+    import bmesh
+    mesh_objs = [o for o in target_col.all_objects if o.type == 'MESH']
+    participating_objs = [o for o in mesh_objs if {s.material for s in o.material_slots if s.material}.intersection(set(selected_mats))]
+
+    log(f'Running Standard Cycles Bake on {len(participating_objs)} meshes at {atlas_size}x{atlas_size}...')
+
+    scene = bpy.context.scene
+    old_selected = list(bpy.context.selected_objects)
+    old_active = bpy.context.view_layer.objects.active
+    old_engine = scene.render.engine
+    old_device = scene.cycles.device
+    old_samples = scene.cycles.samples
+    old_selected_to_active = scene.render.bake.use_selected_to_active
+
+    temp_mats = []
+    atlas_uv_name = 'Atlas_UV'
+    filepath = custom_filepath if custom_filepath else unused_png_path(target_col.name, atlas_size, atlas_size)
+
+    try:
+        orig_uv_names = {}
+        original_slots_map = {}
+        for obj in participating_objs:
+            orig_uv = source_uv_name(obj)
+            orig_uv_names[obj] = orig_uv
+            original_slots_map[obj] = [slot.material for slot in obj.material_slots]
+
+            if atlas_uv_name in obj.data.uv_layers:
+                obj.data.uv_layers.remove(obj.data.uv_layers[atlas_uv_name])
+            new_uv = obj.data.uv_layers.new(name=atlas_uv_name)
+            obj.data.uv_layers.active = new_uv
+
+        for o in bpy.context.selected_objects:
+            o.select_set(False)
+
+        for obj in participating_objs:
+            bpy.context.view_layer.objects.active = obj
+            obj.select_set(True)
+            bpy.ops.object.mode_set(mode='EDIT')
+            
+            bpy.context.tool_settings.mesh_select_mode = (False, False, True)
+            
+            bm = bmesh.from_edit_mesh(obj.data)
+            for v in bm.verts: v.select = False
+            for e in bm.edges: e.select = False
+            for f in bm.faces: f.select = False
+            
+            orig_mats = original_slots_map[obj]
+            for f in bm.faces:
+                slot_m = orig_mats[f.material_index] if f.material_index < len(orig_mats) else None
+                if slot_m and slot_m in selected_mats:
+                    f.select = True
+            
+            bmesh.update_edit_mesh(obj.data)
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        for o in participating_objs:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = participating_objs[0]
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.uv.smart_project(
+            angle_limit=1.15192,
+            island_margin=uv_margin,
+            margin_method='FRACTION',
+            correct_aspect=True,
+            scale_to_bounds=True,
+        )
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        for obj in participating_objs:
+            orig_uv = orig_uv_names[obj]
+            orig_uv_data = obj.data.uv_layers[orig_uv].data
+            atlas_uv_data = obj.data.uv_layers[atlas_uv_name].data
+            orig_mats = original_slots_map[obj]
+            
+            for poly in obj.data.polygons:
+                slot_m = orig_mats[poly.material_index] if poly.material_index < len(orig_mats) else None
+                if not (slot_m and slot_m in selected_mats):
+                    for l_idx in poly.loop_indices:
+                        atlas_uv_data[l_idx].uv = (orig_uv_data[l_idx].uv[0] + 100.0, orig_uv_data[l_idx].uv[1])
+
+        new_img = bpy.data.images.new(
+            name=f"{target_col.name}_ATLAS_{atlas_size}x{atlas_size}",
+            width=atlas_size, height=atlas_size,
+            alpha=False, float_buffer=False)
+        new_img.colorspace_settings.name = 'sRGB'
+
+        cache = {}
+        for obj in participating_objs:
+            orig_uv = orig_uv_names[obj]
+            for slot in obj.material_slots:
+                original = slot.material
+                slot.link = 'DATA'
+                if original is None:
+                    original = bpy.data.materials.new(name='__EmptySlot')
+                    original.diffuse_color = (0.8, 0.8, 0.8, 1)
+                    temp_mats.append(original)
+                if original not in cache:
+                    cache[original] = make_bake_material(original, orig_uv, new_img)
+                    temp_mats.append(cache[original])
+                slot.material = cache[original]
+
+        scene.render.engine = 'CYCLES'
+        scene.cycles.device = 'CPU'
+        scene.cycles.samples = 1
+        scene.render.bake.use_selected_to_active = False
+
+        for idx, obj in enumerate(participating_objs):
+            orig_uv = orig_uv_names[obj]
+            obj.data.uv_layers[orig_uv].active_render = True
+            obj.data.uv_layers.active = obj.data.uv_layers[atlas_uv_name]
+
+            for o in bpy.context.selected_objects:
+                o.select_set(False)
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+
+            use_clear = (idx == 0)
+            result = bpy.ops.object.bake(
+                type='EMIT', target='IMAGE_TEXTURES', uv_layer=atlas_uv_name,
+                margin=bake_margin, margin_type='EXTEND',
+                use_clear=use_clear, use_selected_to_active=False,
+                save_mode='INTERNAL')
+            if 'FINISHED' not in result:
+                raise RuntimeError(f'Bake failed on mesh "{obj.name}": {result}')
+
+        new_img.filepath_raw = filepath
+        new_img.file_format = 'PNG'
+        new_img.save()
+
+        new_mat = new_atlas_material(new_img, atlas_uv_name, f"{target_col.name}_Atlas_Mat")
+
+        for obj in participating_objs:
+            orig_mats = original_slots_map[obj]
+            
+            unselected_unique = []
+            seen_unsel = set()
+            for m in orig_mats:
+                if m and m not in selected_mats and m not in seen_unsel:
+                    seen_unsel.add(m)
+                    unselected_unique.append(m)
+
+            mat_to_idx = {m: 0 for m in selected_mats}
+            for idx_u, m in enumerate(unselected_unique, start=1):
+                mat_to_idx[m] = idx_u
+
+            poly_new_indices = []
+            for poly in obj.data.polygons:
+                orig_m = orig_mats[poly.material_index] if poly.material_index < len(orig_mats) else None
+                if orig_m in selected_mats:
+                    poly_new_indices.append(0)
+                elif orig_m in mat_to_idx:
+                    poly_new_indices.append(mat_to_idx[orig_m])
+                else:
+                    poly_new_indices.append(0)
+
+            obj.data.materials.clear()
+            obj.data.materials.append(new_mat)
+            for m in unselected_unique:
+                obj.data.materials.append(m)
+
+            for poly, new_idx in zip(obj.data.polygons, poly_new_indices):
+                poly.material_index = new_idx
+
+            obj.data.uv_layers[atlas_uv_name].active_render = True
+            obj.data.uv_layers.active = obj.data.uv_layers[atlas_uv_name]
+
+        popup(f"Baked {atlas_size}x{atlas_size} atlas on {len(participating_objs)} meshes! PNG: {filepath}")
+        return participating_objs, filepath
+
+    finally:
+        if bpy.context.object and bpy.context.object.mode != 'OBJECT':
+            try:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
+        scene.render.engine = old_engine
+        scene.cycles.device = old_device
+        scene.cycles.samples = old_samples
+        scene.render.bake.use_selected_to_active = old_selected_to_active
+
+        for mat in temp_mats:
+            if mat and mat.users == 0:
+                bpy.data.materials.remove(mat)
+
+
+# ==============================================================================
+# MAIN OPERATOR
+# ==============================================================================
+
+class SOURCEOPS_OT_CombineTextures(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
+    bl_idname = 'sourceops.combine_textures'
+    bl_label = 'Save Atlas to...'
+    bl_description = 'Combine selected materials into a texture atlas and choose save location'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filename_ext = ".png"
+    filter_glob: bpy.props.StringProperty(default="*.png", options={'HIDDEN'})
+
+    @classmethod
+    def poll(cls, context):
+        sourceops = getattr(context.scene, 'sourceops', None)
+        return bool(sourceops and sourceops.combiner_target_collection)
+
+    def invoke(self, context, event):
+        sourceops = context.scene.sourceops
+        target_col = sourceops.combiner_target_collection
+        if target_col:
+            self.filepath = f"{target_col.name}_Atlas.png"
+        else:
+            self.filepath = "Atlas.png"
+        return super().invoke(context, event)
+
+    def execute(self, context):
+        sourceops = context.scene.sourceops
+        target_col = sourceops.combiner_target_collection
+        size_choice = getattr(sourceops, 'combiner_atlas_size', '2048')
+
+        mesh_objs = [o for o in target_col.all_objects if o.type == 'MESH']
+        all_materials = []
+        seen = set()
+        for o in mesh_objs:
+            for slot in o.material_slots:
+                if slot.material and slot.material not in seen:
+                    seen.add(slot.material)
+                    all_materials.append(slot.material)
+
+        selected_mats = [m for m in all_materials if getattr(m, 'sourceops_combine', True)]
+        if not selected_mats:
+            self.report({'ERROR'}, 'No materials selected to combine!')
+            return {'CANCELLED'}
+
+        try:
+            if size_choice in {'QUAD', 'PO2', 'AUTO'}:
+                objs, filepath = create_smc_atlas(
+                    target_col=target_col,
+                    custom_filepath=self.filepath,
+                    selected_mats=selected_mats,
+                    size_mode=size_choice,
+                    crop=getattr(sourceops, 'combiner_crop', True),
+                    pixel_art=getattr(sourceops, 'combiner_pixel_art', False),
+                    diffuse_size=getattr(sourceops, 'combiner_diffuse_size', 32),
+                    gaps=getattr(sourceops, 'combiner_gaps', 0)
+                )
+            else:
+                atlas_size = int(size_choice)
+                objs, filepath = create_bake_atlas(
+                    target_col=target_col,
+                    custom_filepath=self.filepath,
+                    selected_mats=selected_mats,
+                    atlas_size=atlas_size,
+                    bake_margin=getattr(sourceops, 'combiner_bake_margin', 12),
+                    uv_margin=getattr(sourceops, 'combiner_uv_margin', 0.012)
+                )
+
+            self.report({'INFO'}, f"Combined textures across {len(objs)} meshes ({size_choice})")
+            return {'FINISHED'}
+        except Exception as e:
+            traceback.print_exc()
+            popup(f"{e}", error=True)
+            self.report({'ERROR'}, f"Atlas creation failed: {e}")
+            return {'CANCELLED'}
+
+
+class SOURCEOPS_OT_CombinerSelectAllMats(bpy.types.Operator):
+    bl_idname = 'sourceops.combiner_select_all_mats'
+    bl_label = 'Select All'
+    bl_description = 'Select all materials across the collection'
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    def execute(self, context):
+        col = context.scene.sourceops.combiner_target_collection
+        if col:
+            for o in col.all_objects:
+                if o.type == 'MESH':
+                    for slot in o.material_slots:
+                        if slot.material:
+                            slot.material.sourceops_combine = True
+        return {'FINISHED'}
+
+
+class SOURCEOPS_OT_CombinerDeselectAllMats(bpy.types.Operator):
+    bl_idname = 'sourceops.combiner_deselect_all_mats'
+    bl_label = 'Deselect All'
+    bl_description = 'Deselect all materials across the collection'
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    def execute(self, context):
+        col = context.scene.sourceops.combiner_target_collection
+        if col:
+            for o in col.all_objects:
+                if o.type == 'MESH':
+                    for slot in o.material_slots:
+                        if slot.material:
+                            slot.material.sourceops_combine = False
+        return {'FINISHED'}
+
+
+class SOURCEOPS_OT_CombinerPickActive(bpy.types.Operator):
+    bl_idname = 'sourceops.combiner_pick_active'
+    bl_label = 'Pick Active Collection'
+    bl_description = 'Pick the collection of the active object or active collection in outliner'
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    def execute(self, context):
+        sourceops = context.scene.sourceops
+        col = context.view_layer.active_layer_collection.collection
+        if col and col != context.scene.collection and any(o.type == 'MESH' for o in col.all_objects):
+            sourceops.combiner_target_collection = col
+            self.report({'INFO'}, f"Selected collection: '{col.name}'")
+            return {'FINISHED'}
+
+        obj = context.active_object
+        if obj and obj.users_collection:
+            sourceops.combiner_target_collection = obj.users_collection[0]
+            self.report({'INFO'}, f"Selected collection: '{sourceops.combiner_target_collection.name}'")
+            return {'FINISHED'}
+
+        self.report({'WARNING'}, 'No valid collection found from active object!')
+        return {'FINISHED'}
+
+
+classes = (
+    SOURCEOPS_OT_CombineTextures,
+    SOURCEOPS_OT_CombinerSelectAllMats,
+    SOURCEOPS_OT_CombinerDeselectAllMats,
+    SOURCEOPS_OT_CombinerPickActive,
+)
+
+
+def register():
+    bpy.types.Material.sourceops_combine = bpy.props.BoolProperty(
+        name="Combine to Atlas",
+        description="Include this material when combining textures into the atlas",
+        default=True
+    )
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+
+def unregister():
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
+    if hasattr(bpy.types.Material, 'sourceops_combine'):
+        del bpy.types.Material.sourceops_combine
