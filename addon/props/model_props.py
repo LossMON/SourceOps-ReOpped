@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from . material_folder_props import SOURCEOPS_MaterialFolderProps
 from . model_folder_props import SOURCEOPS_ModelFolderProps
 from . material_props import SOURCEOPS_MaterialProps
@@ -185,3 +185,4 @@ class SOURCEOPS_ModelProps(bpy.types.PropertyGroup):
     vmt_phongmask_source: bpy.props.EnumProperty(name="Phong Mask", items=VMT_PHONG_MASKS, default="NORMAL_ALPHA")
 
     do_not_sort_vmts: bpy.props.BoolProperty(name="Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)", description="When enabled, SourceOps will dump the VMT text block to disk exactly as-is, without any sorting or reformatting", default=False)
+    show_material_settings: bpy.props.BoolProperty(name='Show Material Settings', description='Expand or collapse material settings', default=False)

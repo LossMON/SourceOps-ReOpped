@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 
 VTF_FORMATS = ["RGBA8888", "ABGR8888", "RGB888", "BGR888", "RGB565", "I8", "IA88", "A8", "RGB888_BLUESCREEN", "BGR888_BLUESCREEN", "ARGB8888", "BGRA8888", "DXT1", "DXT3", "DXT5", "BGRX8888", "BGR565", "BGRX5551", "BGRA4444", "DXT1_ONEBITALPHA", "BGRA5551", "UV88", "UVWQ8888", "RGBA16161616F", "RGBA16161616", "UVLX8888"]
 VTF_RESIZE_METHODS = ["NEAREST", "BIGGEST", "SMALLEST"]
@@ -98,3 +98,4 @@ class SOURCEOPS_MaterialProps(bpy.types.PropertyGroup):
     vmt_phongmask_source: bpy.props.EnumProperty(name="Phong Mask", items=VMT_PHONG_MASKS, default="NORMAL_ALPHA")
 
     do_not_sort_vmts: bpy.props.BoolProperty(name="Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)", description="When enabled, SourceOps will dump the VMT text block to disk exactly as-is, without any sorting or reformatting", default=False)
+    show_material_settings: bpy.props.BoolProperty(name='Show Material Settings', description='Expand or collapse material settings', default=False)

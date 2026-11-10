@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from .. utils import common
 from .. import icons
 
@@ -152,119 +152,128 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                 row = box.row()
                 row.alignment = 'CENTER'
                 row.label(text='(Global Material Settings, Materials that are listed in materials properties will ignore these Global Settings)')
-                
-                box.separator()
-                box.label(text='Model Default Textures:', icon='TEXTURE')
-                col = common.split_column(box)
-                col.prop(model, 'vtf_format')
-                col.prop(model, 'vtf_alphaformat')
-                
-                box.separator()
-                box.label(text='Mipmaps:', icon='IMAGE_ZDEPTH')
-                col = common.split_column(box)
-                col.prop(model, 'vtf_nomipmaps')
-                if not model.vtf_nomipmaps:
-                    col.prop(model, 'vtf_mfilter')
-                    col.prop(model, 'vtf_msharpen')
-                    
-                box.separator()
-                box.label(text='Resize (-resize):', icon='FULLSCREEN_ENTER')
-                col = common.split_column(box)
-                col.prop(model, 'vtf_resize')
-                if model.vtf_resize:
-                    col.prop(model, 'vtf_rmethod')
-                    col.prop(model, 'vtf_rfilter')
-                    col.prop(model, 'vtf_rsharpen')
-                    col.prop(model, 'vtf_rwidth')
-                    col.prop(model, 'vtf_rheight')
-                    col.prop(model, 'vtf_rclampwidth')
-                    col.prop(model, 'vtf_rclampheight')
 
-                box.separator()
-                box.label(text='Normal Maps (-normal):', icon='MATFLUID')
-                col = common.split_column(box)
-                col.prop(model, 'vtf_normal_map')
-                if model.vtf_normal_map:
-                    col.prop(model, 'vtf_nkernel')
-                    col.prop(model, 'vtf_nheight')
-                    col.prop(model, 'vtf_nalpha')
-                    col.prop(model, 'vtf_nscale')
-                    col.prop(model, 'vtf_nwrap')
-
-                box.separator()
-                box.label(text='Extras:', icon='MODIFIER')
-                col = common.split_column(box)
-                col.prop(model, 'vtf_gamma')
-                if model.vtf_gamma:
-                    col.prop(model, 'vtf_gcorrection')
-                col.prop(model, 'vtf_bumpscale')
-                col.prop(model, 'vtf_nothumbnail')
-                col.prop(model, 'vtf_noreflectivity')
-
-                box.separator()
-                flags_box = box.box()
-                flags_box.label(text="Flags (-flag)", icon='BOOKMARKS')
-                flags_row = flags_box.row()
-                f_col1 = flags_row.column()
-                f_col2 = flags_row.column()
-                
-                flags = ["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
-                
-                for i, flag in enumerate(flags):
-                    if i < 10: f_col1.prop(model, f"vtf_flag_{flag}")
-                    else: f_col2.prop(model, f"vtf_flag_{flag}")
-                    
-                box.separator()
-                box.label(text='VMT Material Setup (Global):', icon='SHADING_RENDERED')
-                col = common.split_column(box)
-                col.prop(model, 'vmt_shader')
-                col.prop(model, 'vmt_translucent')
-                col.prop(model, 'vmt_alphatest')
-                col.prop(model, 'vmt_nocull')
-
-                # Global Cubemap Reflection ($envmap)
-                box.separator()
-                box.label(text='Cubemap Reflection ($envmap):', icon='SHADING_TEXTURE')
-                col = common.split_column(box)
-                col.prop(model, 'vmt_envmap', text='Enable Cubemap ($envmap)')
-                if model.vmt_envmap:
-                    col.prop(model, 'vmt_use_envmaptint', text='Enable $envmaptint')
-                    if model.vmt_use_envmaptint:
-                        col.prop(model, 'vmt_envmaptint')
-                    col.prop(model, 'vmt_envmapfresnel')
-                    col.prop(model, 'vmt_envmapmask_source')
-
-                # Global Reflectivity ($reflectivity)
-                box.separator()
-                box.label(text='Reflectivity ($reflectivity):', icon='SHADING_RENDERED')
-                col = common.split_column(box)
-                col.prop(model, 'vmt_reflectivity', text='Enable $reflectivity')
-                if model.vmt_reflectivity:
-                    col.prop(model, 'vmt_reflectivity_vec')
-
-                # Global Phong Specular ($phong)
-                box.separator()
-                box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
-                col = common.split_column(box)
-                col.prop(model, 'vmt_phong', text='Enable Phong ($phong)')
-                if model.vmt_phong:
-                    col.prop(model, 'vmt_phongboost')
-                    col.prop(model, 'vmt_phongexponent')
-                    col.prop(model, 'vmt_phongfresnelranges')
-                    col.prop(model, 'vmt_phongtint')
-                    col.prop(model, 'vmt_phongalbedotint')
-                    col.prop(model, 'vmt_phongmask_source')
-
-                box.separator()
-                box.label(text='Global VMT Editor:', icon='TEXT')
                 row = box.row(align=True)
-                row.scale_y = 1.2
-                op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT (Global)', icon='TEXT')
-                op.is_global = True
-                op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
-                op2.is_global = True
-                row2 = box.row(align=True)
-                row2.prop(model, 'do_not_sort_vmts', text='Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)', icon='PINNED')
+                row.scale_y = 1.25
+                if model.show_material_settings:
+                    row.prop(model, 'show_material_settings', text='Close All Material Settings', icon='TRIA_DOWN')
+                else:
+                    row.prop(model, 'show_material_settings', text='Open All Material Settings', icon='TRIA_RIGHT')
+
+                if model.show_material_settings:
+                
+                    box.separator()
+                    box.label(text='Model Default Textures:', icon='TEXTURE')
+                    col = common.split_column(box)
+                    col.prop(model, 'vtf_format')
+                    col.prop(model, 'vtf_alphaformat')
+                
+                    box.separator()
+                    box.label(text='Mipmaps:', icon='IMAGE_ZDEPTH')
+                    col = common.split_column(box)
+                    col.prop(model, 'vtf_nomipmaps')
+                    if not model.vtf_nomipmaps:
+                        col.prop(model, 'vtf_mfilter')
+                        col.prop(model, 'vtf_msharpen')
+                    
+                    box.separator()
+                    box.label(text='Resize (-resize):', icon='FULLSCREEN_ENTER')
+                    col = common.split_column(box)
+                    col.prop(model, 'vtf_resize')
+                    if model.vtf_resize:
+                        col.prop(model, 'vtf_rmethod')
+                        col.prop(model, 'vtf_rfilter')
+                        col.prop(model, 'vtf_rsharpen')
+                        col.prop(model, 'vtf_rwidth')
+                        col.prop(model, 'vtf_rheight')
+                        col.prop(model, 'vtf_rclampwidth')
+                        col.prop(model, 'vtf_rclampheight')
+
+                    box.separator()
+                    box.label(text='Normal Maps (-normal):', icon='MATFLUID')
+                    col = common.split_column(box)
+                    col.prop(model, 'vtf_normal_map')
+                    if model.vtf_normal_map:
+                        col.prop(model, 'vtf_nkernel')
+                        col.prop(model, 'vtf_nheight')
+                        col.prop(model, 'vtf_nalpha')
+                        col.prop(model, 'vtf_nscale')
+                        col.prop(model, 'vtf_nwrap')
+
+                    box.separator()
+                    box.label(text='Extras:', icon='MODIFIER')
+                    col = common.split_column(box)
+                    col.prop(model, 'vtf_gamma')
+                    if model.vtf_gamma:
+                        col.prop(model, 'vtf_gcorrection')
+                    col.prop(model, 'vtf_bumpscale')
+                    col.prop(model, 'vtf_nothumbnail')
+                    col.prop(model, 'vtf_noreflectivity')
+
+                    box.separator()
+                    flags_box = box.box()
+                    flags_box.label(text="Flags (-flag)", icon='BOOKMARKS')
+                    flags_row = flags_box.row()
+                    f_col1 = flags_row.column()
+                    f_col2 = flags_row.column()
+                
+                    flags = ["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
+                
+                    for i, flag in enumerate(flags):
+                        if i < 10: f_col1.prop(model, f"vtf_flag_{flag}")
+                        else: f_col2.prop(model, f"vtf_flag_{flag}")
+                    
+                    box.separator()
+                    box.label(text='VMT Material Setup (Global):', icon='SHADING_RENDERED')
+                    col = common.split_column(box)
+                    col.prop(model, 'vmt_shader')
+                    col.prop(model, 'vmt_translucent')
+                    col.prop(model, 'vmt_alphatest')
+                    col.prop(model, 'vmt_nocull')
+
+                    # Global Cubemap Reflection ($envmap)
+                    box.separator()
+                    box.label(text='Cubemap Reflection ($envmap):', icon='SHADING_TEXTURE')
+                    col = common.split_column(box)
+                    col.prop(model, 'vmt_envmap', text='Enable Cubemap ($envmap)')
+                    if model.vmt_envmap:
+                        col.prop(model, 'vmt_use_envmaptint', text='Enable $envmaptint')
+                        if model.vmt_use_envmaptint:
+                            col.prop(model, 'vmt_envmaptint')
+                        col.prop(model, 'vmt_envmapfresnel')
+                        col.prop(model, 'vmt_envmapmask_source')
+
+                    # Global Reflectivity ($reflectivity)
+                    box.separator()
+                    box.label(text='Reflectivity ($reflectivity):', icon='SHADING_RENDERED')
+                    col = common.split_column(box)
+                    col.prop(model, 'vmt_reflectivity', text='Enable $reflectivity')
+                    if model.vmt_reflectivity:
+                        col.prop(model, 'vmt_reflectivity_vec')
+
+                    # Global Phong Specular ($phong)
+                    box.separator()
+                    box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
+                    col = common.split_column(box)
+                    col.prop(model, 'vmt_phong', text='Enable Phong ($phong)')
+                    if model.vmt_phong:
+                        col.prop(model, 'vmt_phongboost')
+                        col.prop(model, 'vmt_phongexponent')
+                        col.prop(model, 'vmt_phongfresnelranges')
+                        col.prop(model, 'vmt_phongtint')
+                        col.prop(model, 'vmt_phongalbedotint')
+                        col.prop(model, 'vmt_phongmask_source')
+
+                    box.separator()
+                    box.label(text='Global VMT Editor:', icon='TEXT')
+                    row = box.row(align=True)
+                    row.scale_y = 1.2
+                    op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT (Global)', icon='TEXT')
+                    op.is_global = True
+                    op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
+                    op2.is_global = True
+                    row2 = box.row(align=True)
+                    row2.prop(model, 'do_not_sort_vmts', text='Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)', icon='PINNED')
 
         elif model and sourceops.panel == 'MODEL_OPTIONS':
             box = layout.box()
@@ -362,12 +371,12 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                 self.draw_texture_settings(box, material_item, 'MATERIAL')
 
             # --- NORMAL MAP BOX ---
-            norm_box = layout.box()
-            norm_header = norm_box.row()
-            norm_header.alignment = 'CENTER'
-            norm_header.label(text='NormalMap', icon='TEXTURE')
+            if material_item and material_item.show_material_settings:
+                norm_box = layout.box()
+                norm_header = norm_box.row()
+                norm_header.alignment = 'CENTER'
+                norm_header.label(text='NormalMap', icon='TEXTURE')
 
-            if material_item:
                 norm_col = common.split_column(norm_box)
                 n_row = norm_col.row(align=True)
                 search_source = 'images' if len(bpy.data.images) > 0 else 'materials'
@@ -389,8 +398,6 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
                     norm_box.label(text='Mode: Generating new normal map from base texture', icon='INFO')
                 elif material_item.normal_map:
                     norm_box.label(text='Mode: Using assigned normal map from model', icon='CHECKMARK')
-            else:
-                norm_box.label(text='Select a material above to configure Normal Map', icon='INFO')
 
             # --- SKINS LIST ---
             box = layout.box()
@@ -546,6 +553,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             row.operator('sourceops.view_model_plusplus', text='', icon_value=icons.id('hlmvplusplus'))
             
             op = row.operator('sourceops.export_auto', text='', icon='AUTO')
+            row.operator('sourceops.export_settings', text='', icon='MODIFIER')
 
         if sourceops and sourceops.panel == 'MAPS':
             box = layout.box()
@@ -690,123 +698,132 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
     def draw_texture_settings(self, box, config, item_type):
         col = common.split_column(box)
         col.prop_search(config, 'name', bpy.data, 'materials', text='Material Name')
-        
-        box.separator()
-        box.label(text='VTF Format:', icon='TEXTURE')
-        col = common.split_column(box)
-        col.prop(config, 'vtf_format')
-        col.prop(config, 'vtf_alphaformat')
-        
-        box.separator()
-        box.label(text='Mipmaps:', icon='IMAGE_ZDEPTH')
-        col = common.split_column(box)
-        col.prop(config, 'vtf_nomipmaps')
-        if not config.vtf_nomipmaps:
-            col.prop(config, 'vtf_mfilter')
-            col.prop(config, 'vtf_msharpen')
-            
-        box.separator()
-        box.label(text='Resize (-resize):', icon='FULLSCREEN_ENTER')
-        col = common.split_column(box)
-        col.prop(config, 'vtf_resize')
-        if config.vtf_resize:
-            col.prop(config, 'vtf_rmethod')
-            col.prop(config, 'vtf_rfilter')
-            col.prop(config, 'vtf_rsharpen')
-            col.prop(config, 'vtf_rwidth')
-            col.prop(config, 'vtf_rheight')
-            col.prop(config, 'vtf_rclampwidth')
-            col.prop(config, 'vtf_rclampheight')
 
-        box.separator()
-        box.label(text='Normal Maps (-normal):', icon='MATFLUID')
-        col = common.split_column(box)
-        col.prop(config, 'vtf_normal_map')
-        if config.vtf_normal_map:
-            col.prop(config, 'vtf_nkernel')
-            col.prop(config, 'vtf_nheight')
-            col.prop(config, 'vtf_nalpha')
-            col.prop(config, 'vtf_nscale')
-            col.prop(config, 'vtf_nwrap')
-
-        box.separator()
-        box.label(text='Extras:', icon='MODIFIER')
-        col = common.split_column(box)
-        col.prop(config, 'vtf_gamma')
-        if config.vtf_gamma:
-            col.prop(config, 'vtf_gcorrection')
-        col.prop(config, 'vtf_bumpscale')
-        col.prop(config, 'vtf_nothumbnail')
-        col.prop(config, 'vtf_noreflectivity')
-
-        box.separator()
-        flags_box = box.box()
-        flags_box.label(text="Flags (-flag)", icon='BOOKMARKS')
-        flags_row = flags_box.row()
-        f_col1 = flags_row.column()
-        f_col2 = flags_row.column()
-        
-        flags = ["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
-        
-        for i, flag in enumerate(flags):
-            if i < 10: f_col1.prop(config, f"vtf_flag_{flag}")
-            else: f_col2.prop(config, f"vtf_flag_{flag}")
-            
-        box.separator()
-        box.label(text='VMT Material Setup:', icon='SHADING_RENDERED')
-        col = common.split_column(box)
-        col.prop(config, 'vmt_shader')
-        col.prop(config, 'vmt_translucent')
-        col.prop(config, 'vmt_alphatest')
-        col.prop(config, 'vmt_nocull')
-
-        # --- REFLECTIONS ($envmap) ---
-        box.separator()
-        box.label(text='Cubemap Reflection ($envmap):', icon='SHADING_TEXTURE')
-        col = common.split_column(box)
-        col.prop(config, 'vmt_envmap', text='Enable Cubemap ($envmap)')
-        if config.vmt_envmap:
-            col.prop(config, 'vmt_use_envmaptint', text='Enable $envmaptint')
-            if config.vmt_use_envmaptint:
-                col.prop(config, 'vmt_envmaptint')
-            col.prop(config, 'vmt_envmapfresnel')
-            col.prop(config, 'vmt_envmapmask_source')
-
-        # --- REFLECTIVITY ($reflectivity) ---
-        box.separator()
-        box.label(text='Reflectivity ($reflectivity):', icon='SHADING_RENDERED')
-        col = common.split_column(box)
-        col.prop(config, 'vmt_reflectivity', text='Enable $reflectivity')
-        if config.vmt_reflectivity:
-            col.prop(config, 'vmt_reflectivity_vec')
-
-        # --- PHONG SPECULAR ($phong) ---
-        box.separator()
-        box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
-        col = common.split_column(box)
-        col.prop(config, 'vmt_phong', text='Enable Phong ($phong)')
-        if config.vmt_phong:
-            col.prop(config, 'vmt_phongboost')
-            col.prop(config, 'vmt_phongexponent')
-            col.prop(config, 'vmt_phongfresnelranges')
-            col.prop(config, 'vmt_phongtint')
-            col.prop(config, 'vmt_phongalbedotint')
-            col.prop(config, 'vmt_phongmask_source')
-        
-        box.separator()
-        box.label(text='Custom VMT Editor:', icon='TEXT')
         row = box.row(align=True)
-        row.scale_y = 1.2
-        op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT', icon='TEXT')
-        op.item_type = item_type
-        op.is_global = False
+        row.scale_y = 1.25
+        if config.show_material_settings:
+            row.prop(config, 'show_material_settings', text='Close All Material Settings', icon='TRIA_DOWN')
+        else:
+            row.prop(config, 'show_material_settings', text='Open All Material Settings', icon='TRIA_RIGHT')
+
+        if config.show_material_settings:
         
-        op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
-        op2.item_type = item_type
-        op2.is_global = False
+            box.separator()
+            box.label(text='VTF Format:', icon='TEXTURE')
+            col = common.split_column(box)
+            col.prop(config, 'vtf_format')
+            col.prop(config, 'vtf_alphaformat')
         
-        row3 = box.row(align=True)
-        row3.prop(config, 'do_not_sort_vmts', text='Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)', icon='PINNED')
+            box.separator()
+            box.label(text='Mipmaps:', icon='IMAGE_ZDEPTH')
+            col = common.split_column(box)
+            col.prop(config, 'vtf_nomipmaps')
+            if not config.vtf_nomipmaps:
+                col.prop(config, 'vtf_mfilter')
+                col.prop(config, 'vtf_msharpen')
+            
+            box.separator()
+            box.label(text='Resize (-resize):', icon='FULLSCREEN_ENTER')
+            col = common.split_column(box)
+            col.prop(config, 'vtf_resize')
+            if config.vtf_resize:
+                col.prop(config, 'vtf_rmethod')
+                col.prop(config, 'vtf_rfilter')
+                col.prop(config, 'vtf_rsharpen')
+                col.prop(config, 'vtf_rwidth')
+                col.prop(config, 'vtf_rheight')
+                col.prop(config, 'vtf_rclampwidth')
+                col.prop(config, 'vtf_rclampheight')
+
+            box.separator()
+            box.label(text='Normal Maps (-normal):', icon='MATFLUID')
+            col = common.split_column(box)
+            col.prop(config, 'vtf_normal_map')
+            if config.vtf_normal_map:
+                col.prop(config, 'vtf_nkernel')
+                col.prop(config, 'vtf_nheight')
+                col.prop(config, 'vtf_nalpha')
+                col.prop(config, 'vtf_nscale')
+                col.prop(config, 'vtf_nwrap')
+
+            box.separator()
+            box.label(text='Extras:', icon='MODIFIER')
+            col = common.split_column(box)
+            col.prop(config, 'vtf_gamma')
+            if config.vtf_gamma:
+                col.prop(config, 'vtf_gcorrection')
+            col.prop(config, 'vtf_bumpscale')
+            col.prop(config, 'vtf_nothumbnail')
+            col.prop(config, 'vtf_noreflectivity')
+
+            box.separator()
+            flags_box = box.box()
+            flags_box.label(text="Flags (-flag)", icon='BOOKMARKS')
+            flags_row = flags_box.row()
+            f_col1 = flags_row.column()
+            f_col2 = flags_row.column()
+        
+            flags = ["POINTSAMPLE", "TRILINEAR", "CLAMPS", "CLAMPT", "ANISOTROPIC", "HINT_DXT5", "NORMAL", "NOMIP", "NOLOD", "MINMIP", "PROCEDURAL", "RENDERTARGET", "DEPTHRENDERTARGET", "NODEBUGOVERRIDE", "SINGLECOPY", "NODEPTHBUFFER", "CLAMPU", "VERTEXTEXTURE", "SSBUMP", "BORDER"]
+        
+            for i, flag in enumerate(flags):
+                if i < 10: f_col1.prop(config, f"vtf_flag_{flag}")
+                else: f_col2.prop(config, f"vtf_flag_{flag}")
+            
+            box.separator()
+            box.label(text='VMT Material Setup:', icon='SHADING_RENDERED')
+            col = common.split_column(box)
+            col.prop(config, 'vmt_shader')
+            col.prop(config, 'vmt_translucent')
+            col.prop(config, 'vmt_alphatest')
+            col.prop(config, 'vmt_nocull')
+
+            # --- REFLECTIONS ($envmap) ---
+            box.separator()
+            box.label(text='Cubemap Reflection ($envmap):', icon='SHADING_TEXTURE')
+            col = common.split_column(box)
+            col.prop(config, 'vmt_envmap', text='Enable Cubemap ($envmap)')
+            if config.vmt_envmap:
+                col.prop(config, 'vmt_use_envmaptint', text='Enable $envmaptint')
+                if config.vmt_use_envmaptint:
+                    col.prop(config, 'vmt_envmaptint')
+                col.prop(config, 'vmt_envmapfresnel')
+                col.prop(config, 'vmt_envmapmask_source')
+
+            # --- REFLECTIVITY ($reflectivity) ---
+            box.separator()
+            box.label(text='Reflectivity ($reflectivity):', icon='SHADING_RENDERED')
+            col = common.split_column(box)
+            col.prop(config, 'vmt_reflectivity', text='Enable $reflectivity')
+            if config.vmt_reflectivity:
+                col.prop(config, 'vmt_reflectivity_vec')
+
+            # --- PHONG SPECULAR ($phong) ---
+            box.separator()
+            box.label(text='Specular Highlight ($phong):', icon='LIGHT_SUN')
+            col = common.split_column(box)
+            col.prop(config, 'vmt_phong', text='Enable Phong ($phong)')
+            if config.vmt_phong:
+                col.prop(config, 'vmt_phongboost')
+                col.prop(config, 'vmt_phongexponent')
+                col.prop(config, 'vmt_phongfresnelranges')
+                col.prop(config, 'vmt_phongtint')
+                col.prop(config, 'vmt_phongalbedotint')
+                col.prop(config, 'vmt_phongmask_source')
+        
+            box.separator()
+            box.label(text='Custom VMT Editor:', icon='TEXT')
+            row = box.row(align=True)
+            row.scale_y = 1.2
+            op = row.operator('sourceops.preview_vmt', text='Preview / Edit VMT', icon='TEXT')
+            op.item_type = item_type
+            op.is_global = False
+        
+            op2 = row.operator('sourceops.reset_vmt', text='Reset', icon='FILE_REFRESH')
+            op2.item_type = item_type
+            op2.is_global = False
+        
+            row3 = box.row(align=True)
+            row3.prop(config, 'do_not_sort_vmts', text='Do Not Sort VMTs (Enable This If The Vmt Options Are Getting Messed Up)', icon='PINNED')
 
     def draw_list_buttons(self, layout, item):
         op = layout.operator('sourceops.list_operator', text='', icon='ADD')

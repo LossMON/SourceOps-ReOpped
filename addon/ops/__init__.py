@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 from . import open_folder
 from . import export_meshes
 from . import generate_qc
@@ -25,6 +25,7 @@ classes = (
     view_model.SOURCEOPS_OT_ViewModel,
     view_model_plusplus.SOURCEOPS_OT_ViewModelPlusPlus,
     export_auto.SOURCEOPS_OT_ExportAuto,
+    export_auto.SOURCEOPS_OT_ExportSettings,
     list_operator.SOURCEOPS_OT_ListOperator,
     list_operator.SOURCEOPS_OT_AddSelectedCollections,
     list_operator.SOURCEOPS_OT_AddSelectedCollectionsSkins,

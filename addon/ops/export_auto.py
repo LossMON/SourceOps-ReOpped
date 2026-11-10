@@ -10,7 +10,7 @@ class SOURCEOPS_OT_ExportAuto(bpy.types.Operator):
     bl_idname = 'sourceops.export_auto'
     bl_options = {'REGISTER'}
     bl_label = 'Export Auto'
-    bl_description = 'Export checked models, generate QCs, compile MDLs.\nCtrl click to customize export steps'
+    bl_description = 'Export checked models, generate QCs, compile MDLs'
 
     def draw(self, context):
         layout = self.layout
@@ -53,6 +53,13 @@ class SOURCEOPS_OT_ExportAuto(bpy.types.Operator):
         return prefs and game and sourceops and model
 
     def invoke(self, context, event):
+        if event.ctrl:
+            def draw_notice(self_menu, context):
+                self_menu.layout.label(text="Click The Wrench Button", icon='MODIFIER')
+            context.window_manager.popup_menu(draw_notice, title="Notice", icon='INFO')
+            self.report({'INFO'}, "Click The Wrench Button")
+            return {'CANCELLED'}
+
         prefs = utils.common.get_prefs(context)
         game = utils.common.get_game(prefs)
 
@@ -60,10 +67,7 @@ class SOURCEOPS_OT_ExportAuto(bpy.types.Operator):
             self.report({'ERROR'}, 'Game is invalid')
             return {'CANCELLED'}
 
-        if event.ctrl:
-            return context.window_manager.invoke_props_dialog(self)
-        else:
-            return self.execute(context)
+        return self.execute(context)
 
     def execute(self, context):
         prefs = utils.common.get_prefs(context)
@@ -146,3 +150,47 @@ class SOURCEOPS_OT_ExportAuto(bpy.types.Operator):
             error = source_model.generate_qc()
             if error:
                 return error
+
+class SOURCEOPS_OT_ExportSettings(bpy.types.Operator):
+    bl_idname = 'sourceops.export_settings'
+    bl_options = {'REGISTER'}
+    bl_label = 'Export Settings'
+    bl_description = 'Configure export steps and settings'
+
+    def draw(self, context):
+        layout = self.layout
+        sourceops = context.scene.sourceops
+        col = layout.column()
+
+        col.prop(sourceops, 'auto_export_meshes')
+        col.prop(sourceops, 'auto_generate_qc')
+
+        col.prop(sourceops, 'auto_compile_qc')
+        sub_comp = col.column()
+        sub_comp.enabled = sourceops.auto_compile_qc
+        sub_comp.prop(sourceops, 'use_studiomdlplusplus')
+
+        col.separator()
+        sub_folders = col.column()
+        sub_folders.enabled = not sourceops.auto_create_folders_alone
+        sub_folders.prop(sourceops, 'auto_use_addon_folder')
+        sub_folders.prop(sourceops, 'auto_create_material_folder')
+        col.prop(sourceops, 'auto_create_folders_alone')
+        col.prop(sourceops, 'auto_export_materials')
+
+        sub = col.column()
+        sub.enabled = sourceops.auto_export_materials
+        sub.prop(sourceops, 'auto_overwrite_vtf')
+        sub.prop(sourceops, 'auto_overwrite_vmt')
+
+        col.separator()
+
+        row = col.row()
+        row.prop(sourceops, 'auto_view_model')
+        row.prop(sourceops, 'auto_view_model_plusplus')
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=320)
+
+    def execute(self, context):
+        return {'FINISHED'}
