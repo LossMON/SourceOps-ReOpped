@@ -1,4 +1,4 @@
-import bpy
+﻿import bpy
 import time
 import subprocess
 import os
@@ -51,8 +51,10 @@ class Model:
         self.stem = common.clean_filename(Path(base_name).stem)
         
         self.mod_qc_path = self.mod_raw
+        while self.mod_qc_path.lower().startswith('models/'):
+            self.mod_qc_path = self.mod_qc_path[7:].strip('/')
         while self.mod_qc_path.lower().startswith('materials/'):
-            self.mod_qc_path = self.mod_qc_path[7:]
+            self.mod_qc_path = self.mod_qc_path[10:].strip('/')
             
         if self.mod_qc_path:
             self.name = f"{self.mod_qc_path}/{base_name}"
@@ -68,8 +70,7 @@ class Model:
         self.mapsrc = Path(game.mapsrc)
         self.mesh_type = game.mesh_type
 
-        directory = self.modelsrc.joinpath(self.stem)
-        self.directory = common.verify_folder(directory)
+        self.update_directory()
 
         studiomdl = self.bin.joinpath('studiomdl.exe')
         quickmdl = self.bin.joinpath('quickmdl.exe')
@@ -1224,7 +1225,27 @@ class Model:
                 except Exception as e: 
                     pass
 
+
+    def update_directory(self):
+        base_src = self.modelsrc
+        needs_models = (base_src.name.lower() != 'models')
+        models_dir = 'models' if needs_models else ''
+        rel_path = self.mod_qc_path if self.mod_qc_path else ''
+
+        if getattr(self, 'create_folders_alone', False):
+            parts = [p for p in (models_dir, rel_path) if p]
+            directory = base_src.joinpath(*parts) if parts else base_src
+        elif getattr(self, 'use_addon_folder', True):
+            parts = [p for p in (self.stem, models_dir, rel_path) if p]
+            directory = base_src.joinpath(*parts)
+        else:
+            parts = [p for p in (models_dir, rel_path) if p]
+            directory = base_src.joinpath(*parts) if parts else base_src.joinpath(self.stem)
+
+        self.directory = common.verify_folder(directory)
+        return self.directory
     def ensure_modelsrc_folder(self):
+        self.update_directory()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.directory.joinpath('anims').mkdir(parents=True, exist_ok=True)
 

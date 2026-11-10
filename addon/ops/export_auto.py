@@ -98,6 +98,7 @@ class SOURCEOPS_OT_ExportAuto(bpy.types.Operator):
             source_model.overwrite_vtf = sourceops.auto_overwrite_vtf
             source_model.overwrite_vmt = sourceops.auto_overwrite_vmt
             source_model.use_studiomdlplusplus = sourceops.use_studiomdlplusplus
+            source_model.update_directory()
             
             error = self.export(source_model, sourceops)
             if error:
