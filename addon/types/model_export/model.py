@@ -1227,20 +1227,23 @@ class Model:
 
 
     def update_directory(self):
-        base_src = self.modelsrc
-        needs_models = (base_src.name.lower() != 'models')
-        models_dir = 'models' if needs_models else ''
         rel_path = self.mod_qc_path if self.mod_qc_path else ''
 
         if getattr(self, 'create_folders_alone', False):
-            parts = [p for p in (models_dir, rel_path) if p]
-            directory = base_src.joinpath(*parts) if parts else base_src
+            if rel_path:
+                directory = self.modelsrc.joinpath(rel_path)
+            else:
+                directory = self.modelsrc
         elif getattr(self, 'use_addon_folder', True):
-            parts = [p for p in (self.stem, models_dir, rel_path) if p]
-            directory = base_src.joinpath(*parts)
+            if rel_path:
+                directory = self.modelsrc.joinpath(self.stem, rel_path)
+            else:
+                directory = self.modelsrc.joinpath(self.stem)
         else:
-            parts = [p for p in (models_dir, rel_path) if p]
-            directory = base_src.joinpath(*parts) if parts else base_src.joinpath(self.stem)
+            if rel_path:
+                directory = self.modelsrc.joinpath(rel_path)
+            else:
+                directory = self.modelsrc.joinpath(self.stem)
 
         self.directory = common.verify_folder(directory)
         return self.directory
