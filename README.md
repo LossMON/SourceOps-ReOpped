@@ -6,7 +6,7 @@
 
 **SourceOps ReOpped** is a massive overhaul of the original SourceOps toolset for Blender. I remade and optimized this version to kill the manual bottlenecks in the Source 1 pipeline specifically automating textures, collisions, and complex QC setups so you don't have to spend half your time in a text editor.
 
-**Compatibility:** Blender 5.0 all the way up to 5.2+.
+**Compatibility:** Blender 4.0 all the way up to 5.2+.
 
 ---
 
