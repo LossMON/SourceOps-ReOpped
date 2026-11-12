@@ -59,12 +59,27 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
 
         if sourceops:
             box = layout.box()
-            row = box.row()
-            row.scale_x = row.scale_y = 1.5
-            row.label(text='Panel')
-            row = row.row(align=True)
-            row.alignment = 'RIGHT'
-            row.prop(sourceops, 'panel', expand=True, icon_only=True)
+            header_row = box.row()
+            header_row.scale_x = header_row.scale_y = 1.5
+
+            # Left side
+            left_col = header_row.row()
+            left_col.alignment = 'LEFT'
+            left_col.label(text='Panel')
+
+            # Center text
+            model_panels = {'MODELS', 'MODEL_OPTIONS', 'TEXTURES', 'SEQUENCES', 'EVENTS', 'ATTACHMENTS', 'PARTICLES'}
+            mid_col = header_row.row()
+            mid_col.alignment = 'CENTER'
+            if model and sourceops.panel in model_panels and model.name:
+                mid_col.label(text=f"You are configuring: {model.name}")
+            else:
+                mid_col.label(text="")
+
+            # Right side icons (full 1.5 scale restored)
+            right_col = header_row.row(align=True)
+            right_col.alignment = 'RIGHT'
+            right_col.prop(sourceops, 'panel', expand=True, icon_only=True)
 
         if prefs and sourceops.panel == 'GAMES':
             box = layout.box()
@@ -336,6 +351,7 @@ class SOURCEOPS_PT_MainPanel(bpy.types.Panel):
             if model_folder:
                 col = common.split_column(box)
                 col.prop(model_folder, 'name')
+                col.prop(model_folder, 'modelsrc_path', text='Modelsrc Relative Path', placeholder='(Optional) if left empty then it will use the same path as the relative path above')
 
             box = layout.box()
             row = box.row()

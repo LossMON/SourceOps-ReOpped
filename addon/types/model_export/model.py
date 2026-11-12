@@ -45,16 +45,27 @@ class Model:
         self.bin = Path(game.bin)
         
         self.model_folder_items = getattr(model, 'model_folder_items', None)
-        self.mod_raw = self.model_folder_items[0].name.replace('\\', '/').strip('/') if (self.model_folder_items and len(self.model_folder_items) > 0) else ''
-        
+        active_folder = self.model_folder_items[0] if (self.model_folder_items and len(self.model_folder_items) > 0) else None
+        self.mod_raw = active_folder.name.replace('\\', '/').strip('/') if active_folder else ''
+        self.modelsrc_raw = getattr(active_folder, 'modelsrc_path', '').replace('\\', '/').strip('/') if active_folder else ''
+
         base_name = Path(model.name).with_suffix('').as_posix()
         self.stem = common.clean_filename(Path(base_name).stem)
-        
+
         self.mod_qc_path = self.mod_raw
         while self.mod_qc_path.lower().startswith('models/'):
             self.mod_qc_path = self.mod_qc_path[7:].strip('/')
         while self.mod_qc_path.lower().startswith('materials/'):
             self.mod_qc_path = self.mod_qc_path[10:].strip('/')
+
+        if self.modelsrc_raw:
+            self.modelsrc_qc_path = self.modelsrc_raw
+            while self.modelsrc_qc_path.lower().startswith('modelsrc/'):
+                self.modelsrc_qc_path = self.modelsrc_qc_path[9:].strip('/')
+            while self.modelsrc_qc_path.lower().startswith('models/'):
+                self.modelsrc_qc_path = self.modelsrc_qc_path[7:].strip('/')
+        else:
+            self.modelsrc_qc_path = self.mod_qc_path
             
         if self.mod_qc_path:
             self.name = f"{self.mod_qc_path}/{base_name}"
@@ -1227,7 +1238,7 @@ class Model:
 
 
     def update_directory(self):
-        rel_path = self.mod_qc_path if self.mod_qc_path else ''
+        rel_path = self.modelsrc_qc_path if getattr(self, 'modelsrc_qc_path', None) else (self.mod_qc_path if self.mod_qc_path else '')
 
         if getattr(self, 'create_folders_alone', False):
             if rel_path:
