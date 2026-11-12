@@ -1,6 +1,7 @@
 
 
 
+![SourceOps Reopped Logo](https://raw.githubusercontent.com/LossMON/WORKSHOP-IMAGES/refs/heads/main/sourceops%20reopped%20logo.png)
 
 
 **SourceOps ReOpped** is a massive overhaul of the original SourceOps toolset for Blender. I remade and optimized this version to kill the manual bottlenecks in the Source 1 pipeline specifically automating textures, collisions, and complex QC setups so you don't have to spend half your time in a text editor.
