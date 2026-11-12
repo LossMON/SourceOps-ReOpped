@@ -12,13 +12,14 @@
 
 ## **Video Tutorial**
 [Watch the video tutorial](https://www.youtube.com/watch?v=RWKZuFzWLZE)
-<img width="913" height="537" alt="photo1" src="https://github.com/user-attachments/assets/b6624b13-901d-43df-8659-bec96e1f3d27" />
 
-<img width="913" height="820" alt="photo2" src="https://github.com/user-attachments/assets/65b41315-837c-4be9-bc11-0c7a8df8b3b5" />
+![Photo1](https://raw.githubusercontent.com/LossMON/WORKSHOP-IMAGES/refs/heads/main/photo1.png)
 
-<img width="893" height="610" alt="photo3" src="https://github.com/user-attachments/assets/095ffcbe-84cb-4f88-bf72-181fc5509a22" />
+![Photo2](https://raw.githubusercontent.com/LossMON/WORKSHOP-IMAGES/refs/heads/main/photo2.png)
 
-<img width="883" height="804" alt="photo4" src="https://github.com/user-attachments/assets/2f3c37ae-9962-41d8-8c69-9fdfc9403e42" />
+![Photo3](https://raw.githubusercontent.com/LossMON/WORKSHOP-IMAGES/refs/heads/main/photo3.png)
+
+![Photo4](https://raw.githubusercontent.com/LossMON/WORKSHOP-IMAGES/refs/heads/main/photo4.png)
 
 ---
 
