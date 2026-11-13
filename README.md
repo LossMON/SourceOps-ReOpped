@@ -11,7 +11,8 @@
 ---
 
 ## **Video Tutorial**
-[Watch the video tutorial](https://www.youtube.com/watch?v=RWKZuFzWLZE)
+[Watch the video tutorial](https://youtu.be/oE-4lktVtm4)
+
 
 ![Photo1](https://raw.githubusercontent.com/LossMON/WORKSHOP-IMAGES/refs/heads/main/photo1.png)
 
